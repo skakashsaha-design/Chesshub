@@ -1,0 +1,6 @@
+{
+  "name": "ChessHub",
+  "description": "Lightweight offline-first Android chess app with built-in bots, puzzles, local music player, PGN history, Lichess and Chess.com profiles, and online multiplayer architecture optimized for 1 GB RAM and Android 8.1+.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

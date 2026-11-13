@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ChessHub</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">হোম</string>
+    <string name="nav_play">খেলুন</string>
+    <string name="nav_bots">বট</string>
+    <string name="nav_online">অনলাইন</string>
+    <string name="nav_puzzles">পাজল</string>
+    <string name="nav_profiles">প্রোফাইল</string>
+    <string name="nav_music">মিউজিক</string>
+    <string name="nav_settings">সেটিংস</string>
+    <string name="nav_more">আরও</string>
+
+    <!-- Home -->
+    <string name="home_subtitle">সব ফোনের জন্য দ্রুত ও অফলাইন-ফার্স্ট দাবা</string>
+    <string name="home_quick_play">দ্রুত খেলা</string>
+    <string name="home_play_vs_bot">বটের সাথে খেলুন</string>
+    <string name="home_local_2_player">লোকাল ২ প্লেয়ার</string>
+    <string name="home_online_chess">অনলাইন দাবা</string>
+    <string name="home_puzzles">ট্যাকটিক্যাল পাজল</string>
+    <string name="home_continue_game">খেলা চালিয়ে যান</string>
+    <string name="home_recent_games">সাম্প্রতিক খেলা</string>
+    <string name="home_no_recent_games">এখনও কোনো সংরক্ষিত খেলা নেই। ইতিহাস তৈরি করতে একটি ম্যাচ শুরু করুন।</string>
+    <string name="home_profiles_shortcuts">সংযুক্ত প্রোফাইল</string>
+    <string name="home_lichess_profile">Lichess প্রোফাইল</string>
+    <string name="home_chesscom_profile">Chess.com প্রোফাইল</string>
+    <string name="home_music_shortcut">লোকাল মিউজিক</string>
+    <string name="home_low_memory_badge">লো মেমোরি মোড চালু</string>
+    <string name="home_tap_to_configure">ইউজারনেম যুক্ত করতে ট্যাপ করুন</string>
+
+    <!-- Play & Board -->
+    <string name="play_new_game">নতুন খেলা</string>
+    <string name="play_history">ইতিহাস</string>
+    <string name="play_undo">আগের চাল</string>
+    <string name="play_rotate">বোর্ড ঘোরান</string>
+    <string name="play_resign">পরাজয় স্বীকার</string>
+    <string name="play_draw">ড্র প্রস্তাব</string>
+    <string name="play_restart">পুনরায় শুরু</string>
+    <string name="play_save">সংরক্ষণ</string>
+    <string name="play_pgn">PGN</string>
+    <string name="play_bot_thinking">বট চিন্তা করছে...</string>
+    <string name="play_white_turn">সাদার চাল</string>
+    <string name="play_black_turn">কালোর চাল</string>
+    <string name="play_check">চেক!</string>
+    <string name="play_checkmate">চেকমেট</string>
+    <string name="play_stalemate">স্টেলমেট</string>
+    <string name="play_draw_agreement">সমঝোতায় ড্র</string>
+    <string name="play_draw_threefold">তিনবার পুনরাবৃত্তিতে ড্র</string>
+    <string name="play_draw_fifty">৫০-চাল নিয়মে ড্র</string>
+    <string name="play_draw_insufficient">অপর্যাপ্ত গুটিতে ড্র</string>
+    <string name="play_timeout">সময় শেষ</string>
+    <string name="play_resigned">পরাজয় স্বীকার</string>
+    <string name="play_white_wins">সাদা জিতেছে</string>
+    <string name="play_black_wins">কালো জিতেছে</string>
+    <string name="play_draw_result">ড্র (১/২-১/২)</string>
+    <string name="play_draw_offer_title">ড্র প্রস্তাব</string>
+    <string name="play_draw_offer_msg">ড্র প্রস্তাব গ্রহণ করবেন?</string>
+    <string name="play_accept">গ্রহণ</string>
+    <string name="play_decline">প্রত্যাখ্যান</string>
+    <string name="play_promote_title">সৈন্য প্রমোশন</string>
+    <string name="play_time_control">সময় নিয়ন্ত্রণ</string>
+    <string name="play_custom_time">কাস্টম</string>
+    <string name="play_minutes">মিনিট</string>
+    <string name="play_increment_sec">ইনক্রিমেন্ট (সেকেন্ড)</string>
+    <string name="play_unlimited">সীমাহীন</string>
+    <string name="play_opponent_type">মোড</string>
+    <string name="play_mode_hvh">মানুষ বনাম মানুষ</string>
+    <string name="play_mode_hvb">মানুষ বনাম বট</string>
+    <string name="play_mode_bvb">বট বনাম বট</string>
+    <string name="play_your_color">আপনার রঙ</string>
+    <string name="play_color_white">সাদা</string>
+    <string name="play_color_black">কালো</string>
+    <string name="play_color_random">র‍্যান্ডম</string>
+    <string name="play_start_match">ম্যাচ শুরু করুন</string>
+    <string name="play_confirm_move_prompt">চাল নিশ্চিত করতে গন্তব্য ঘরে আবার ট্যাপ করুন</string>
+    <string name="play_replay_mode">রিপ্লে মোড</string>
+    <string name="play_exit_replay">রিপ্লে থেকে বের হন</string>
+    <string name="play_game_saved">খেলা লোকাল ইতিহাসে সংরক্ষিত হয়েছে</string>
+
+    <!-- Game History & PGN -->
+    <string name="history_title">খেলার ইতিহাস</string>
+    <string name="history_search_hint">খেলোয়াড়, ওপেনিং, ECO খুঁজুন...</string>
+    <string name="history_sort_newest">সর্বশেষ</string>
+    <string name="history_sort_oldest">পুরাতন</string>
+    <string name="history_sort_longest">সর্বাধিক চাল</string>
+    <string name="history_import_pgn">PGN আমদানি</string>
+    <string name="history_export_pgn">PGN রপ্তানি</string>
+    <string name="history_share_pgn">PGN শেয়ার</string>
+    <string name="history_replay">রিপ্লে</string>
+    <string name="history_load">লোড</string>
+    <string name="history_delete">মুছুন</string>
+    <string name="history_pgn_paste_hint">এখানে PGN চাল বা সম্পূর্ণ PGN পেস্ট করুন...</string>
+    <string name="history_pgn_invalid">অবৈধ PGN ফরম্যাট। অনুগ্রহ করে চাল পরীক্ষা করুন।</string>
+    <string name="history_pgn_imported">PGN সফলভাবে আমদানি হয়েছে</string>
+    <string name="history_pgn_copied">PGN ক্লিপবোর্ডে কপি করা হয়েছে</string>
+
+    <!-- Bots -->
+    <string name="bots_title">অফলাইন দাবা বট</string>
+    <string name="bots_subtitle">বিল্ট-ইন ইঞ্জিন — ইন্টারনেট প্রয়োজন নেই</string>
+    <string name="bots_tab_roster">বট তালিকা</string>
+    <string name="bots_tab_training">প্রশিক্ষণ</string>
+    <string name="bots_tab_tournament">টুর্নামেন্ট</string>
+    <string name="bots_play_now">চ্যালেঞ্জ</string>
+    <string name="bots_custom_depth">সার্চ গভীরতা</string>
+    <string name="bots_custom_randomness">ভুলের মাত্রা</string>
+    <string name="bots_custom_time">চিন্তার সময় (ms)</string>
+    <string name="bots_start_bvb">বট বনাম বট দেখুন</string>
+    <string name="bots_start_tournament">৪-বট রাউন্ড রবিন শুরু</string>
+    <string name="bots_training_hint">লাইভ মূল্যায়ন, সেরা চালের ইঙ্গিত এবং সীমাহীন আনডু সহ খেলুন।</string>
+    <string name="bots_rating_label">রেটিং: %1$d</string>
+
+    <!-- Puzzles -->
+    <string name="puzzles_title">ট্যাকটিক্যাল পাজল</string>
+    <string name="puzzles_rating">পাজল রেটিং</string>
+    <string name="puzzles_streak">ধারাবাহিকতা</string>
+    <string name="puzzles_solved">সমাধান</string>
+    <string name="puzzles_hint">ইঙ্গিত</string>
+    <string name="puzzles_next">পরবর্তী পাজল</string>
+    <string name="puzzles_random">র‍্যান্ডম</string>
+    <string name="puzzles_retry">আবার চেষ্টা</string>
+    <string name="puzzles_history">ইতিহাস</string>
+    <string name="puzzles_correct">সঠিক চাল!</string>
+    <string name="puzzles_solved_msg">পাজল সমাধান হয়েছে!</string>
+    <string name="puzzles_wrong">সঠিক চাল নয়। আবার চেষ্টা করুন।</string>
+
+    <!-- Profiles, Lichess, Chess.com -->
+    <string name="profiles_title">দাবা প্রোফাইল</string>
+    <string name="profiles_my_chesshub">আমার ChessHub</string>
+    <string name="profiles_local_rating">লোকাল রেটিং</string>
+    <string name="profiles_games">খেলা</string>
+    <string name="profiles_wins">জয়</string>
+    <string name="profiles_losses">পরাজয়</string>
+    <string name="profiles_draws">ড্র</string>
+    <string name="profiles_username_hint">ইউজারনেম লিখুন</string>
+    <string name="profiles_link">যুক্ত করুন</string>
+    <string name="profiles_unlink">সরান</string>
+    <string name="profiles_refresh">রিফ্রেশ</string>
+    <string name="profiles_open_official">অফিসিয়াল প্রোফাইল খুলুন</string>
+    <string name="profiles_recent_public_games">সাম্প্রতিক পাবলিক খেলা</string>
+    <string name="profiles_import_to_board">রিপ্লে</string>
+    <string name="profiles_cached_offline">ক্যাশ করা প্রোফাইল দেখানো হচ্ছে (অফলাইন)</string>
+    <string name="profiles_lichess_auth_note">অফিসিয়াল Lichess API সক্রিয়। পাসওয়ার্ড কখনও সংরক্ষণ করা হয় না।</string>
+    <string name="profiles_chesscom_note">Chess.com অফিসিয়াল পাবলিক API দ্বারা চালিত (শুধুমাত্র দেখার জন্য)।</string>
+
+    <!-- Online Multiplayer -->
+    <string name="online_title">অনলাইন মাল্টিপ্লেয়ার</string>
+    <string name="online_backend_required_title">অনলাইন সার্ভার প্রয়োজন</string>
+    <string name="online_backend_required_desc">অনলাইন মাল্টিপ্লেয়ারের জন্য সার্ভার-সাইড চাল যাচাইসহ একটি ChessHub সার্ভার প্রয়োজন। কোনো সার্ভার URL সেট না থাকায় ভুয়া অনলাইন খেলা দেখানো হচ্ছে না।</string>
+    <string name="online_configure_server">সার্ভার URL সেট করুন</string>
+    <string name="online_server_url_hint">https://your-chess-server.example.com</string>
+    <string name="online_quick_match">দ্রুত ম্যাচ</string>
+    <string name="online_rated_game">রেটেড খেলা</string>
+    <string name="online_casual_game">ক্যাজুয়াল খেলা</string>
+    <string name="online_friend_challenge">বন্ধু চ্যালেঞ্জ</string>
+    <string name="online_private_room">প্রাইভেট রুম</string>
+    <string name="online_account">অনলাইন অ্যাকাউন্ট</string>
+    <string name="online_login_token">সাইন ইন (টোকেন / OAuth)</string>
+    <string name="online_status_disconnected">কোনো অনলাইন সার্ভারের সাথে যুক্ত নয়</string>
+
+    <!-- Music Player -->
+    <string name="music_title">লোকাল মিউজিক প্লেয়ার</string>
+    <string name="music_subtitle">দাবা খেলার সময় আপনার ফোনের অডিও চালান</string>
+    <string name="music_scan_device">ডিভাইস অডিও স্ক্যান</string>
+    <string name="music_pick_files">অডিও ফাইল বাছুন</string>
+    <string name="music_empty">কোনো গান লোড হয়নি। ডিভাইস স্ক্যান করুন অথবা অডিও ফাইল বেছে নিন।</string>
+    <string name="music_shuffle">শাফেল</string>
+    <string name="music_repeat">রিপিট</string>
+    <string name="music_volume">ভলিউম</string>
+    <string name="music_unknown_artist">অজানা শিল্পী</string>
+    <string name="music_permission_needed">ডিভাইস স্ক্যান করতে অডিও অনুমতি প্রয়োজন, অথবা অনুমতি ছাড়াই অডিও ফাইল বাছুন।</string>
+
+    <!-- Settings & About -->
+    <string name="settings_title">সেটিংস</string>
+    <string name="settings_appearance">থিম ও চেহারা</string>
+    <string name="settings_theme_light">হালকা</string>
+    <string name="settings_theme_dark">গাঢ়</string>
+    <string name="settings_theme_system">সিস্টেম</string>
+    <string name="settings_chess">দাবা</string>
+    <string name="settings_board_theme">বোর্ড থিম</string>
+    <string name="settings_piece_style">গুটির ধরন</string>
+    <string name="settings_coordinates">স্থানাঙ্ক দেখান</string>
+    <string name="settings_animations">চালের অ্যানিমেশন</string>
+    <string name="settings_move_confirm">চাল নিশ্চিতকরণ</string>
+    <string name="settings_legal_moves">বৈধ চাল দেখান</string>
+    <string name="settings_haptics">হ্যাপটিক ভাইব্রেশন</string>
+    <string name="settings_sound">শব্দ</string>
+    <string name="settings_sound_move">চালের শব্দ</string>
+    <string name="settings_sound_capture">গুটি খাওয়ার শব্দ</string>
+    <string name="settings_sound_check">চেকের শব্দ</string>
+    <string name="settings_sound_end">খেলা শেষের শব্দ</string>
+    <string name="settings_sound_ui">UI শব্দ</string>
+    <string name="settings_sound_music">ব্যাকগ্রাউন্ড মিউজিক</string>
+    <string name="settings_performance">পারফরম্যান্স ও ১ জিবি র‍্যাম</string>
+    <string name="settings_low_memory">লো মেমোরি মোড</string>
+    <string name="settings_low_memory_desc">বটের সার্চ গভীরতা ও টেবিল সীমিত করে, চালের পর মেমোরি মুক্ত করে</string>
+    <string name="settings_reduce_anim">অ্যানিমেশন কমান</string>
+    <string name="settings_battery_saver">ব্যাটারি সাশ্রয়ী মোড</string>
+    <string name="settings_data">ডেটা</string>
+    <string name="settings_import_pgn">PGN আমদানি</string>
+    <string name="settings_export_pgn">সব PGN রপ্তানি</string>
+    <string name="settings_clear_cache">প্রোফাইল ক্যাশ মুছুন</string>
+    <string name="settings_delete_data">সব লোকাল ডেটা মুছুন</string>
+    <string name="settings_delete_confirm">সংরক্ষিত সব খেলা, পাজল এবং ক্যাশ মুছে ফেলবেন?</string>
+    <string name="settings_accounts">অ্যাকাউন্ট</string>
+    <string name="settings_other">অন্যান্য</string>
+    <string name="settings_language">ভাষা</string>
+    <string name="settings_lang_en">English</string>
+    <string name="settings_lang_bn">বাংলা</string>
+    <string name="settings_about">ChessHub সম্পর্কে</string>
+    <string name="settings_privacy">গোপনীয়তা নীতি</string>
+    <string name="settings_licenses">ওপেন-সোর্স লাইসেন্স</string>
+
+    <!-- About & Legal -->
+    <string name="about_description">অফলাইন দাবা, বট, অনলাইন দাবা আর্কিটেকচার, লোকাল মিউজিক এবং পাবলিক দাবা প্রোফাইল ইন্টিগ্রেশনসহ একটি স্বাধীন দাবা অ্যাপ্লিকেশন।</string>
+    <string name="about_disclaimer">ChessHub কোনোভাবেই Chess.com বা Lichess-এর সাথে যুক্ত বা অনুমোদিত নয়।</string>
+    <string name="privacy_body">ChessHub আপনার খেলা, সেটিংস ও পাজল অগ্রগতি শুধুমাত্র আপনার ফোনে SQLite/Room-এ সংরক্ষণ করে। কোনো পাসওয়ার্ড সংরক্ষণ করা হয় না।</string>
+    <string name="licenses_body">Kotlin, Jetpack Compose, AndroidX, Room, Retrofit, OkHttp, Moshi এবং Coroutines (Apache 2.0) ব্যবহার করে নির্মিত।</string>
+
+    <!-- Common -->
+    <string name="cancel">বাতিল</string>
+    <string name="ok">ঠিক আছে</string>
+    <string name="confirm">নিশ্চিত</string>
+    <string name="close">বন্ধ</string>
+    <string name="error_no_internet">ইন্টারনেট সংযোগ নেই।</string>
+    <string name="error_rate_limited">সার্ভার রেট লিমিট করেছে। একটু পর আবার চেষ্টা করুন।</string>
+    <string name="error_user_not_found">ইউজারনেম পাওয়া যায়নি।</string>
+    <string name="error_generic">অনুরোধ ব্যর্থ হয়েছে। আবার চেষ্টা করুন।</string>
+</resources>
