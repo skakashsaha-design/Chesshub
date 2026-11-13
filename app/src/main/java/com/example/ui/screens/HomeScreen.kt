@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Group
@@ -235,6 +236,13 @@ fun HomeScreen(
             modifier = Modifier.weight(1f).testTag("home_puzzles_btn"),
           )
         }
+
+        HomeActionTile(
+          title = stringResource(R.string.home_analysis_lab),
+          icon = Icons.Filled.Analytics,
+          onClick = { onNavigate(AppSection.ANALYSIS) },
+          modifier = Modifier.fillMaxWidth().testTag("home_analysis_btn"),
+        )
       }
     }
 

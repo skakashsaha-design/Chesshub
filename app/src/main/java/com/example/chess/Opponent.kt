@@ -10,6 +10,15 @@ enum class BotDifficulty(val label: String) {
   CUSTOM("Custom"),
 }
 
+enum class BotPlayingStyle(val label: String, val summary: String) {
+  BALANCED("Balanced", "All-round tactical and positional play"),
+  AGGRESSIVE("Aggressive", "Favors attacks, checks, and open kingside lines"),
+  SOLID("Solid", "Prioritizes king safety, structure, and clean trades"),
+  TACTICAL("Tactical", "Hunts forks, pins, sacrifices, and sharp complications"),
+  POSITIONAL("Positional", "Seeks outposts, center control, and space"),
+  ENDGAME_SPECIALIST("Endgame", "Steers toward favorable simplified endings"),
+}
+
 data class BotProfile(
   val id: String,
   val name: String,
@@ -21,6 +30,7 @@ data class BotProfile(
   val randomnessCp: Int,
   val emblemColorHex: Long,
   val iconType: String,
+  val playingStyle: BotPlayingStyle = BotPlayingStyle.BALANCED,
 )
 
 /**

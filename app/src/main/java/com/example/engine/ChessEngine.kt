@@ -1,6 +1,7 @@
 package com.example.engine
 
 import com.example.chess.BoardState
+import com.example.chess.BotPlayingStyle
 import com.example.chess.ChessRules
 import com.example.chess.Move
 import com.example.chess.PieceCode
@@ -15,6 +16,25 @@ import kotlinx.coroutines.ensureActive
 data class SearchResult(
   val bestMove: Move,
   val scoreCp: Int,
+  val depthReached: Int,
+  val nodesVisited: Int,
+)
+
+data class EngineCandidate(
+  val move: Move,
+  val scoreCpForSide: Int,
+  val mateInForSide: Int?,
+  val pvMoves: List<Move>,
+)
+
+data class EngineAnalysisOutput(
+  val bestMove: Move?,
+  val scoreCpForSide: Int,
+  val mateInForSide: Int?,
+  val pvMoves: List<Move>,
+  val candidates: List<EngineCandidate>,
+  val threatMove: Move?,
+  val threatSwingCp: Int,
   val depthReached: Int,
   val nodesVisited: Int,
 )
@@ -64,6 +84,7 @@ class ChessEngine {
     budget: SearchBudget,
     randomnessCp: Int = 0,
     recentHashes: Map<String, Int> = emptyMap(),
+    playingStyle: BotPlayingStyle = BotPlayingStyle.BALANCED,
   ): SearchResult? {
     val legal = ChessRules.legalMoves(state)
     if (legal.isEmpty()) return null
@@ -75,7 +96,8 @@ class ChessEngine {
     if (budget.maxDepth <= 1 && randomnessCp >= 180) {
       val scored = legal.map { m ->
         val next = ChessRules.applyMove(state, m)
-        val eval = -evaluateStatic(next) + Random.nextInt(-randomnessCp, randomnessCp + 1)
+        val styleAdj = computeStyleBiasCp(state, m, next, playingStyle)
+        val eval = -evaluateStatic(next) + styleAdj + Random.nextInt(-randomnessCp, randomnessCp + 1)
         m to eval
       }.sortedByDescending { it.second }
       val chosen = scored.first().first
@@ -100,7 +122,7 @@ class ChessEngine {
       var iterBestMove = ordered[0]
       var iterBestScore = -MATE_SCORE
 
-      val moveScores = if (depth == budget.maxDepth && randomnessCp > 0) {
+      val moveScores = if (depth == budget.maxDepth && (randomnessCp > 0 || playingStyle != BotPlayingStyle.BALANCED)) {
         ArrayList<Pair<Move, Int>>(ordered.size)
       } else {
         null
@@ -109,11 +131,11 @@ class ChessEngine {
       for (move in ordered) {
         if (checkTimeout()) break
         val next = ChessRules.applyMove(state, move)
-        // Discourage accidental threefold repetition when ahead
         val repKey = ChessRules.repetitionKey(next)
         val repPenalty = if ((recentHashes[repKey] ?: 0) >= 2) -40 else 0
+        val styleAdj = if (depth == budget.maxDepth) computeStyleBiasCp(state, move, next, playingStyle) else 0
 
-        val score = -negamax(next, depth - 1, -beta, -alpha, ply = 1) + repPenalty
+        val score = -negamax(next, depth - 1, -beta, -alpha, ply = 1) + repPenalty + styleAdj
         if (aborted) break
 
         moveScores?.add(move to score)
@@ -146,6 +168,241 @@ class ChessEngine {
       releaseMemory()
     }
     return SearchResult(bestMove, bestScore, depthReached.coerceAtLeast(1), nodes)
+  }
+
+  /**
+   * Computes granular analysis output: only calculates PV, Candidate Moves, and Threat probe
+   * when their respective booleans are enabled, minimizing CPU/RAM usage on 1 GB RAM devices.
+   */
+  suspend fun analyzeDetailed(
+    state: BoardState,
+    budget: SearchBudget,
+    includePv: Boolean,
+    includeCandidates: Boolean,
+    includeThreat: Boolean,
+    candidateCount: Int = 3,
+  ): EngineAnalysisOutput {
+    val legal = ChessRules.legalMoves(state)
+    if (legal.isEmpty()) {
+      val terminalEval = if (ChessRules.isInCheck(state)) -MATE_SCORE else 0
+      return EngineAnalysisOutput(
+        bestMove = null,
+        scoreCpForSide = terminalEval,
+        mateInForSide = if (ChessRules.isInCheck(state)) 0 else null,
+        pvMoves = emptyList(),
+        candidates = emptyList(),
+        threatMove = null,
+        threatSwingCp = 0,
+        depthReached = 1,
+        nodesVisited = 1,
+      )
+    }
+
+    ensureTtCapacity(budget.ttPowerOfTwoSize)
+    nodes = 0
+    aborted = false
+    deadlineNs = System.nanoTime() + budget.maxTimeMs * 1_000_000L
+
+    var bestMove = legal[0]
+    var bestScore = evaluateStatic(state)
+    var depthReached = 1
+    var rootScoredMoves: List<Pair<Move, Int>> = listOf(legal[0] to bestScore)
+
+    val effectiveMaxDepth = budget.maxDepth.coerceIn(1, 5)
+    for (depth in 1..effectiveMaxDepth) {
+      coroutineContext.ensureActive()
+      val ordered = orderMoves(state, legal, getTtPackedMove(state.zobristHash))
+      var alpha = -MATE_SCORE
+      val beta = MATE_SCORE
+      var iterBestMove = ordered[0]
+      var iterBestScore = -MATE_SCORE
+      val iterPairs = ArrayList<Pair<Move, Int>>(ordered.size)
+
+      for (move in ordered) {
+        if (checkTimeout()) break
+        val next = ChessRules.applyMove(state, move)
+        // If collecting candidate moves on the final pass, use slightly wider window so top 3 are accurately ranked
+        val searchAlpha = if (includeCandidates && depth == effectiveMaxDepth && iterPairs.size < candidateCount) {
+          -MATE_SCORE
+        } else {
+          alpha
+        }
+        val score = -negamax(next, depth - 1, -beta, -searchAlpha, ply = 1)
+        if (aborted) break
+
+        iterPairs.add(move to score)
+        if (score > iterBestScore) {
+          iterBestScore = score
+          iterBestMove = move
+        }
+        if (score > alpha) alpha = score
+      }
+
+      if (!aborted && iterPairs.isNotEmpty()) {
+        bestMove = iterBestMove
+        bestScore = iterBestScore
+        depthReached = depth
+        rootScoredMoves = iterPairs.sortedByDescending { it.second }
+        if (abs(bestScore) >= MATE_THRESHOLD) break
+      } else {
+        break
+      }
+    }
+
+    val pvMoves = if (includePv) {
+      extractPvLine(state, bestMove, maxPlies = 5)
+    } else {
+      emptyList()
+    }
+
+    val candidates = if (includeCandidates) {
+      rootScoredMoves.take(candidateCount.coerceIn(1, 4)).map { (mv, sc) ->
+        val pv = if (includePv) extractPvLine(state, mv, maxPlies = 4) else listOf(mv)
+        EngineCandidate(
+          move = mv,
+          scoreCpForSide = sc,
+          mateInForSide = scoreToMateMoves(sc),
+          pvMoves = pv,
+        )
+      }
+    } else {
+      emptyList()
+    }
+
+    var threatMove: Move? = null
+    var threatSwingCp = 0
+    if (includeThreat && !ChessRules.isInCheck(state)) {
+      val nullMoveState = state.copy(
+        turn = state.turn.opposite(),
+        enPassantSq = -1,
+        zobristHash = ChessRules.computeHash(state.board, state.turn.opposite(), state.castlingMask, -1),
+      )
+      val threatLegal = ChessRules.legalMoves(nullMoveState)
+      if (threatLegal.isNotEmpty()) {
+        // Shallow fast search for opponent's immediate most dangerous threat
+        aborted = false
+        deadlineNs = System.nanoTime() + 90_000_000L // max 90ms for threat detection
+        var bestThreat: Move? = null
+        var bestThreatScore = -MATE_SCORE
+        val orderedThreats = orderMoves(nullMoveState, threatLegal, 0).take(14)
+        val staticBaselineForOpp = -evaluateStatic(state)
+        for (tm in orderedThreats) {
+          if (checkTimeout()) break
+          val afterThreat = ChessRules.applyMove(nullMoveState, tm)
+          val tScore = -negamax(afterThreat, depth = 1, alphaInit = -MATE_SCORE, beta = MATE_SCORE, ply = 1)
+          if (!aborted && tScore > bestThreatScore) {
+            bestThreatScore = tScore
+            bestThreat = tm
+          }
+        }
+        val swing = bestThreatScore - staticBaselineForOpp
+        if (bestThreat != null && (swing >= 75 || bestThreatScore >= MATE_THRESHOLD || ChessRules.isInCheck(ChessRules.applyMove(nullMoveState, bestThreat)))) {
+          threatMove = bestThreat
+          threatSwingCp = swing.coerceAtLeast(80)
+        }
+      }
+    }
+
+    if (budget.releaseAfterMove) {
+      releaseMemory()
+    }
+
+    return EngineAnalysisOutput(
+      bestMove = bestMove,
+      scoreCpForSide = bestScore,
+      mateInForSide = scoreToMateMoves(bestScore),
+      pvMoves = pvMoves,
+      candidates = candidates,
+      threatMove = threatMove,
+      threatSwingCp = threatSwingCp,
+      depthReached = depthReached,
+      nodesVisited = nodes,
+    )
+  }
+
+  private fun extractPvLine(state: BoardState, firstMove: Move, maxPlies: Int): List<Move> {
+    val line = ArrayList<Move>(maxPlies)
+    var cur = state
+    var nextMove: Move? = firstMove
+    val visited = HashSet<Long>(maxPlies)
+    while (nextMove != null && line.size < maxPlies && visited.add(cur.zobristHash)) {
+      val legal = ChessRules.legalMoves(cur)
+      val matched = legal.firstOrNull { it.from == nextMove!!.from && it.to == nextMove!!.to && it.promotion == nextMove!!.promotion }
+        ?: legal.firstOrNull { it.from == nextMove!!.from && it.to == nextMove!!.to }
+        ?: break
+      line.add(matched)
+      cur = ChessRules.applyMove(cur, matched)
+      val ttPacked = getTtPackedMove(cur.zobristHash)
+      nextMove = if (ttPacked != 0) {
+        val f = ttPacked and 63
+        val t = (ttPacked ushr 6) and 63
+        ChessRules.legalMoves(cur).firstOrNull { it.from == f && it.to == t }
+      } else {
+        // 1-ply static pick so PV always stays coherent even on shallow TT
+        ChessRules.legalMoves(cur).maxByOrNull { m -> -evaluateStatic(ChessRules.applyMove(cur, m)) }
+      }
+    }
+    return line
+  }
+
+  private fun scoreToMateMoves(score: Int): Int? {
+    if (abs(score) < MATE_THRESHOLD) return null
+    val plies = (MATE_SCORE - abs(score)).coerceAtLeast(1)
+    val fullMoves = ((plies + 1) / 2).coerceAtLeast(1)
+    return if (score > 0) fullMoves else -fullMoves
+  }
+
+  private fun computeStyleBiasCp(
+    before: BoardState,
+    move: Move,
+    after: BoardState,
+    style: BotPlayingStyle,
+  ): Int {
+    if (style == BotPlayingStyle.BALANCED) return 0
+    val movingType = PieceCode.typeOf(before.board[move.from]) ?: return 0
+    val isCapture = move.capturedPiece != PieceCode.EMPTY || move.isEnPassant
+    val givesCheck = ChessRules.isInCheck(after)
+    return when (style) {
+      BotPlayingStyle.BALANCED -> 0
+      BotPlayingStyle.AGGRESSIVE -> {
+        var b = 0
+        if (givesCheck) b += 18
+        if (isCapture) b += 10
+        val targetRank = SquareUtil.rankOf(move.to)
+        val forward = if (before.turn == PieceColor.WHITE) targetRank else 7 - targetRank
+        if (forward >= 4 && movingType != PieceType.KING) b += 8
+        b
+      }
+      BotPlayingStyle.SOLID -> {
+        var b = 0
+        if (move.isCastleKingside || move.isCastleQueenside) b += 22
+        if (movingType == PieceType.PAWN && SquareUtil.fileOf(move.to) in 2..5) b += 6
+        if (isCapture && movingType == PieceType.QUEEN) b -= 8
+        b
+      }
+      BotPlayingStyle.TACTICAL -> {
+        var b = 0
+        if (givesCheck) b += 14
+        if (isCapture) b += 12
+        if (movingType == PieceType.KNIGHT || movingType == PieceType.BISHOP) b += 6
+        b
+      }
+      BotPlayingStyle.POSITIONAL -> {
+        var b = 0
+        val f = SquareUtil.fileOf(move.to)
+        val r = SquareUtil.rankOf(move.to)
+        if (f in 2..5 && r in 2..5) b += 10
+        if (movingType == PieceType.BISHOP || movingType == PieceType.ROOK) b += 5
+        b
+      }
+      BotPlayingStyle.ENDGAME_SPECIALIST -> {
+        var b = 0
+        if (isCapture) b += 10
+        if (movingType == PieceType.PAWN && (SquareUtil.rankOf(move.to) >= 5 || SquareUtil.rankOf(move.to) <= 2)) b += 12
+        if (movingType == PieceType.KING) b += 6
+        b
+      }
+    }
   }
 
   fun evaluatePositionForWhite(state: BoardState): Int {

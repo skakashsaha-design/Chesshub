@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -13,6 +14,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -38,10 +42,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.AppSection
 import com.example.R
+import com.example.chess.PieceCode
 import com.example.database.AppSettingsEntity
 import com.example.engine.MemoryProfile
 import com.example.ui.board.BoardThemeOption
 import com.example.ui.board.PieceStyleOption
+import com.example.ui.board.PieceVectorRenderer
+import com.example.ui.theme.AppAccentOption
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -96,12 +103,54 @@ fun SettingsScreen(
             )
           }
         }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(stringResource(R.string.settings_accent_color), style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          AppAccentOption.entries.forEach { accent ->
+            FilterChip(
+              selected = settings.appAccent == accent.key,
+              onClick = { onUpdateSettings { it.copy(appAccent = accent.key) } },
+              label = { Text(accent.displayName) },
+            )
+          }
+        }
       }
     }
 
     // Chess
     item {
       SettingsSectionCard(title = stringResource(R.string.settings_chess)) {
+        val activeBoard = remember(settings.boardTheme) { BoardThemeOption.fromKey(settings.boardTheme) }
+        val activeStyle = remember(settings.pieceStyle) { PieceStyleOption.fromKey(settings.pieceStyle) }
+        val sampleRow = remember {
+          intArrayOf(
+            PieceCode.WK, PieceCode.WQ, PieceCode.WR, PieceCode.WB,
+            PieceCode.WN, PieceCode.WP, PieceCode.BQ, PieceCode.BK,
+          )
+        }
+        Canvas(
+          modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(MaterialTheme.shapes.small),
+        ) {
+          val sqW = size.width / sampleRow.size
+          val sqH = size.height
+          val pieceSize = minOf(sqW, sqH)
+          sampleRow.forEachIndexed { idx, code ->
+            val bg = if (idx % 2 == 0) activeBoard.lightSquare else activeBoard.darkSquare
+            drawRect(color = bg, topLeft = Offset(idx * sqW, 0f), size = Size(sqW, sqH))
+            with(PieceVectorRenderer) {
+              drawPiece(
+                pieceCode = code,
+                topLeft = Offset(idx * sqW + (sqW - pieceSize) / 2f, (sqH - pieceSize) / 2f),
+                squareSize = pieceSize,
+                style = activeStyle,
+              )
+            }
+          }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
         Text(stringResource(R.string.settings_board_theme), style = MaterialTheme.typography.labelLarge)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           BoardThemeOption.entries.forEach { theme ->
@@ -161,6 +210,108 @@ fun SettingsScreen(
         }
         SettingsToggleRow(stringResource(R.string.settings_sound_music), settings.musicEnabled) { v ->
           onUpdateSettings { it.copy(musicEnabled = v) }
+        }
+      }
+    }
+
+    // Analysis & Feedback Controls (13 Independent ON/OFF Switches)
+    item {
+      SettingsSectionCard(title = stringResource(R.string.settings_analysis_controls)) {
+        Text(
+          text = "Toggle each feature ON or OFF independently. Disabled features hide UI and skip engine calculations.",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+          OutlinedButton(
+            onClick = {
+              onUpdateSettings {
+                it.copy(
+                  showEvalBar = true,
+                  showThreatArrow = true,
+                  showSuggestionArrow = true,
+                  showEngineLine = true,
+                  showMoveFeedback = true,
+                  showBotMoveFeedback = true,
+                  enableGameAnalysis = true,
+                  showEvalGraph = true,
+                  showCandidateMoves = true,
+                  showTacticalSuggestions = true,
+                  enableCriticalMoments = true,
+                  showOpeningInfo = true,
+                  enableEngineAnalysis = true,
+                )
+              }
+            },
+            modifier = Modifier.weight(1f),
+          ) {
+            Text("All ON")
+          }
+          OutlinedButton(
+            onClick = {
+              onUpdateSettings {
+                it.copy(
+                  showEvalBar = false,
+                  showThreatArrow = false,
+                  showSuggestionArrow = false,
+                  showEngineLine = false,
+                  showMoveFeedback = false,
+                  showBotMoveFeedback = false,
+                  enableGameAnalysis = false,
+                  showEvalGraph = false,
+                  showCandidateMoves = false,
+                  showTacticalSuggestions = false,
+                  enableCriticalMoments = false,
+                  showOpeningInfo = false,
+                  enableEngineAnalysis = false,
+                )
+              }
+            },
+            modifier = Modifier.weight(1f),
+          ) {
+            Text("All OFF")
+          }
+        }
+        SettingsToggleRow(
+          label = stringResource(R.string.toggle_engine_analysis),
+          subtitle = "Master switch for live position & threat engine calculations",
+          checked = settings.enableEngineAnalysis,
+        ) { v -> onUpdateSettings { it.copy(enableEngineAnalysis = v) } }
+        SettingsToggleRow(stringResource(R.string.toggle_eval_bar), settings.showEvalBar) { v ->
+          onUpdateSettings { it.copy(showEvalBar = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_threat_arrow), settings.showThreatArrow) { v ->
+          onUpdateSettings { it.copy(showThreatArrow = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_suggestion_arrow), settings.showSuggestionArrow) { v ->
+          onUpdateSettings { it.copy(showSuggestionArrow = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_engine_line), settings.showEngineLine) { v ->
+          onUpdateSettings { it.copy(showEngineLine = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_move_feedback), settings.showMoveFeedback) { v ->
+          onUpdateSettings { it.copy(showMoveFeedback = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_bot_move_feedback), settings.showBotMoveFeedback) { v ->
+          onUpdateSettings { it.copy(showBotMoveFeedback = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_game_analysis), settings.enableGameAnalysis) { v ->
+          onUpdateSettings { it.copy(enableGameAnalysis = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_eval_graph), settings.showEvalGraph) { v ->
+          onUpdateSettings { it.copy(showEvalGraph = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_candidate_moves), settings.showCandidateMoves) { v ->
+          onUpdateSettings { it.copy(showCandidateMoves = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_tactical_suggestions), settings.showTacticalSuggestions) { v ->
+          onUpdateSettings { it.copy(showTacticalSuggestions = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_critical_moments), settings.enableCriticalMoments) { v ->
+          onUpdateSettings { it.copy(enableCriticalMoments = v) }
+        }
+        SettingsToggleRow(stringResource(R.string.toggle_opening_info), settings.showOpeningInfo) { v ->
+          onUpdateSettings { it.copy(showOpeningInfo = v) }
         }
       }
     }

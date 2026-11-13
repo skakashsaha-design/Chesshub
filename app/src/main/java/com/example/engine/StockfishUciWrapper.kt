@@ -159,7 +159,7 @@ class StockfishUciWrapper(context: Context) {
         state = state,
         budget = budget,
         skillLevel = mapBotToSkillLevel(bot),
-        limitElo = if (bot.difficulty != BotDifficulty.MASTER) bot.rating.coerceIn(600, 2600) else null,
+        limitElo = if (bot.rating < 3200) bot.rating.coerceIn(600, 3190) else null,
       )
       if (uciResult != null) return uciResult
     }
@@ -170,6 +170,7 @@ class StockfishUciWrapper(context: Context) {
         budget = budget,
         randomnessCp = bot.randomnessCp,
         recentHashes = recentHashes,
+        playingStyle = bot.playingStyle,
       )
     } ?: return null
 
@@ -228,6 +229,39 @@ class StockfishUciWrapper(context: Context) {
   }
 
   fun evaluateStaticForWhite(state: BoardState): Int = fallbackEngine.evaluatePositionForWhite(state)
+
+  suspend fun analyzeDetailed(
+    state: BoardState,
+    budget: SearchBudget,
+    includePv: Boolean,
+    includeCandidates: Boolean,
+    includeThreat: Boolean,
+    candidateCount: Int = 3,
+  ): EngineAnalysisOutput = withContext(Dispatchers.Default) {
+    val result = fallbackEngine.analyzeDetailed(
+      state = state,
+      budget = budget,
+      includePv = includePv,
+      includeCandidates = includeCandidates,
+      includeThreat = includeThreat,
+      candidateCount = candidateCount,
+    )
+    val sign = if (state.turn == PieceColor.WHITE) 1 else -1
+    val whiteCp = result.scoreCpForSide * sign
+    val mateWhite = result.mateInForSide?.let { it * sign }
+    val evalSummary = PositionEvaluation(
+      scoreCpForWhite = whiteCp,
+      mateInMoves = mateWhite,
+      bestMoveUci = result.bestMove?.toUci(),
+      depthReached = result.depthReached,
+      nodesVisited = result.nodesVisited,
+      backend = _status.value.backend,
+    )
+    _status.value = _status.value.copy(
+      lastInfoSummary = "d${result.depthReached} • ${result.nodesVisited}n • ${formatEval(evalSummary)}",
+    )
+    result
+  }
 
   suspend fun releaseSearchMemory() {
     fallbackEngine.releaseMemory()

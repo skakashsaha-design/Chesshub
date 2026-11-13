@@ -59,6 +59,24 @@ class StockfishEngineService : Service() {
     return wrapper.evaluatePosition(state, budget)
   }
 
+  suspend fun analyzeDetailed(
+    state: BoardState,
+    budget: SearchBudget,
+    includePv: Boolean,
+    includeCandidates: Boolean,
+    includeThreat: Boolean,
+    candidateCount: Int = 3,
+  ): EngineAnalysisOutput {
+    return wrapper.analyzeDetailed(
+      state = state,
+      budget = budget,
+      includePv = includePv,
+      includeCandidates = includeCandidates,
+      includeThreat = includeThreat,
+      candidateCount = candidateCount,
+    )
+  }
+
   fun evaluateStaticForWhite(state: BoardState): Int =
     wrapper.evaluateStaticForWhite(state)
 

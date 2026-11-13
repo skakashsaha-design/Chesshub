@@ -9,7 +9,17 @@ import android.os.IBinder
 import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.analysis.AnalysisCoordinator
+import com.example.analysis.AnalysisPolicy
+import com.example.analysis.AnalysisSessionState
+import com.example.analysis.GameReviewSummary
+import com.example.analysis.MoveAnalysisEntry
+import com.example.analysis.MoveClassification
+import com.example.analysis.MoveFeedbackAnalyzer
+import com.example.analysis.PositionAnalysisSnapshot
+import com.example.analysis.TrainerDrill
 import com.example.bots.BotCatalog
+import com.example.bots.BotDialogueEngine
 import com.example.bots.BotTournamentEngine
 import com.example.bots.TournamentProgress
 import com.example.chess.BoardState
@@ -36,7 +46,9 @@ import com.example.database.GameEntity
 import com.example.database.GameSummaryRow
 import com.example.database.PuzzleProgressEntity
 import com.example.engine.DeviceMemoryAdvisor
+import com.example.engine.EngineAnalysisOutput
 import com.example.engine.MemoryProfile
+import com.example.engine.SearchBudget
 import com.example.engine.StockfishEngineService
 import com.example.engine.StockfishEngineStatus
 import com.example.engine.StockfishUciWrapper
@@ -50,8 +62,6 @@ import com.example.offline.SoundAndHaptics
 import com.example.offline.TimeControl
 import com.example.online.OnlineMatchRequest
 import com.example.online.OnlineMultiplayerClient
-import com.example.puzzles.ChessPuzzle
-import com.example.puzzles.PuzzleCatalog
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -143,9 +153,6 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   private val _gameState = MutableStateFlow(ActiveGameUiState())
   val gameState: StateFlow<ActiveGameUiState> = _gameState.asStateFlow()
 
-  private val _puzzleState = MutableStateFlow(createPuzzleUiState(PuzzleCatalog.puzzles.first()))
-  val puzzleState: StateFlow<PuzzleUiState> = _puzzleState.asStateFlow()
-
   private val _lichessProfile = MutableStateFlow(PlatformProfileUiState())
   val lichessProfile: StateFlow<PlatformProfileUiState> = _lichessProfile.asStateFlow()
 
@@ -158,7 +165,19 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   private val _engineStatus = MutableStateFlow(fallbackEngineWrapper.status.value)
   val engineStatus: StateFlow<StockfishEngineStatus> = _engineStatus.asStateFlow()
 
+  private val _analysisSession = MutableStateFlow(
+    AnalysisSessionState(
+      boardState = ChessRules.initialBoardState(),
+      historyStates = listOf(ChessRules.initialBoardState()),
+      historyMoves = emptyList(),
+      legalMoves = ChessRules.legalMoves(ChessRules.initialBoardState()),
+    )
+  )
+  val analysisSession: StateFlow<AnalysisSessionState> = _analysisSession.asStateFlow()
+
   private var evalJob: Job? = null
+  private var analysisEvalJob: Job? = null
+  private var gameReviewJob: Job? = null
 
   private val engineServiceConnection = object : ServiceConnection {
     override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -196,10 +215,11 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         loadCachedProfile("CHESSCOM")
       }
     }
+    val defaultPlayerName = settings.value.playerName.ifBlank { "ChessHub Player" }
     startNewGame(
       mode = GameMode.HUMAN_VS_BOT,
-      white = Opponent.Human("You"),
-      black = Opponent.Bot(BotCatalog.presets[1]),
+      white = Opponent.Human(defaultPlayerName),
+      black = Opponent.Bot(BotCatalog.presets[3]),
       timeControl = TimeControl.presets[6],
       navigateToPlay = false,
     )
@@ -220,10 +240,11 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   // region Game Lifecycle & Moves
 
   fun startQuickPlay() {
+    val playerName = settings.value.playerName.ifBlank { "ChessHub Player" }
     startNewGame(
       mode = GameMode.HUMAN_VS_BOT,
-      white = Opponent.Human("You"),
-      black = Opponent.Bot(BotCatalog.presets[2]),
+      white = Opponent.Human(playerName),
+      black = Opponent.Bot(BotCatalog.presets[4]),
       timeControl = TimeControl.presets[4], // 5+0
       navigateToPlay = true,
     )
@@ -238,9 +259,11 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     navigateToPlay: Boolean = true,
     initialBoard: BoardState = ChessRules.initialBoardState(),
     initialMoves: List<RecordedMove> = emptyList(),
+    customStartFen: String? = null,
   ) {
     botThinkJob?.cancel()
     clockTickJob?.cancel()
+    evalJob?.cancel()
     repetitionCounts.clear()
     repetitionCounts[ChessRules.repetitionKey(initialBoard)] = 1
 
@@ -250,6 +273,17 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     }
 
     val flipped = white is Opponent.Bot && black is Opponent.Human
+    val primaryBot = (black as? Opponent.Bot)?.profile ?: (white as? Opponent.Bot)?.profile
+    val initialDialogue = primaryBot?.let {
+      BotDialogueEngine.onGameStart(it, botPlaysWhite = white is Opponent.Bot)
+    }
+    val curSettings = settings.value
+    val opening = if (curSettings.showOpeningInfo) OpeningBook.recognize(initialMoves.map { it.san }) else null
+    val staticEval = if (AnalysisPolicy.shouldRunLiveEngine(curSettings) || trainingMode) {
+      engineService?.evaluateStaticForWhite(initialBoard)
+        ?: fallbackEngineWrapper.evaluateStaticForWhite(initialBoard)
+    } else 0
+
     _gameState.value = ActiveGameUiState(
       gameId = null,
       mode = mode,
@@ -263,20 +297,28 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       timeControl = timeControl,
       whiteTimeMs = timeControl.initialMillis,
       blackTimeMs = timeControl.initialMillis,
-      opening = OpeningBook.recognize(initialMoves.map { it.san }),
+      opening = opening,
       trainingMode = trainingMode,
-      evalCpForWhite = if (trainingMode) {
-        engineService?.evaluateStaticForWhite(initialBoard)
-          ?: fallbackEngineWrapper.evaluateStaticForWhite(initialBoard)
-      } else 0,
+      evalCpForWhite = staticEval,
       evalMateIn = null,
       startedAtMillis = System.currentTimeMillis(),
+      botDialogue = initialDialogue,
+      botDialogueHistory = listOfNotNull(initialDialogue),
+      customStartFen = customStartFen,
     )
 
     if (navigateToPlay) {
       _currentSection.value = AppSection.PLAY
     }
     startClockTickerIfNeeded()
+    refreshLivePlayAnalysis(
+      stateBeforeMove = null,
+      playedMove = null,
+      playedSan = null,
+      preMoveSnapshot = null,
+      nextState = initialBoard,
+      sanMoves = initialMoves.map { it.san },
+    )
     maybeTriggerBotTurn()
   }
 
@@ -388,6 +430,26 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         ?: fallbackEngineWrapper.evaluateStaticForWhite(nextState)
     } else g.evalCpForWhite
 
+    val activeBotOpp = (if (mover == PieceColor.WHITE) g.whiteOpponent else g.blackOpponent) as? Opponent.Bot
+    val otherBotOpp = (if (mover == PieceColor.WHITE) g.blackOpponent else g.whiteOpponent) as? Opponent.Bot
+    val speakingBot = activeBotOpp ?: otherBotOpp
+    val newDialogue = if (res != GameResult.IN_PROGRESS && speakingBot != null) {
+      val botPlayedWhite = g.whiteOpponent is Opponent.Bot &&
+        (g.whiteOpponent as Opponent.Bot).profile.id == speakingBot.profile.id
+      BotDialogueEngine.onGameFinished(speakingBot.profile, res, reason, botPlayedWhite)
+    } else if (speakingBot != null) {
+      BotDialogueEngine.onMovePlayed(
+        bot = speakingBot.profile,
+        move = move,
+        byBot = activeBotOpp != null,
+        isCheck = isCheck,
+        moveNumber = nextState.fullMoveNumber,
+      )
+    } else null
+
+    val previousState = g.boardState
+    val preSnapshot = g.liveAnalysis
+
     _gameState.update {
       it.copy(
         boardState = nextState,
@@ -402,17 +464,26 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         blackTimeMs = bMs,
         result = res,
         termination = reason,
-        opening = opening ?: it.opening,
+        opening = if (s.showOpeningInfo) (opening ?: it.opening) else null,
         drawOfferPendingFrom = null,
         evalCpForWhite = staticEvalCp,
         evalMateIn = null,
         hintMove = null,
+        botDialogue = newDialogue ?: it.botDialogue,
+        botDialogueHistory = if (newDialogue != null) {
+          (it.botDialogueHistory + newDialogue).takeLast(12)
+        } else it.botDialogueHistory,
       )
     }
 
-    if (g.trainingMode && res == GameResult.IN_PROGRESS) {
-      refreshPositionEvaluation(nextState)
-    }
+    refreshLivePlayAnalysis(
+      stateBeforeMove = previousState,
+      playedMove = move,
+      playedSan = san,
+      preMoveSnapshot = preSnapshot,
+      nextState = nextState,
+      sanMoves = newMoves.map { it.san },
+    )
 
     if (res != GameResult.IN_PROGRESS) {
       onGameFinished(res, reason)
@@ -430,24 +501,117 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     }
   }
 
-  private fun refreshPositionEvaluation(state: BoardState) {
+  private suspend fun runEngineDetailed(
+    state: BoardState,
+    budget: SearchBudget,
+    includePv: Boolean,
+    includeCandidates: Boolean,
+    includeThreat: Boolean,
+  ): EngineAnalysisOutput {
+    return engineService?.analyzeDetailed(
+      state = state,
+      budget = budget,
+      includePv = includePv,
+      includeCandidates = includeCandidates,
+      includeThreat = includeThreat,
+    ) ?: fallbackEngineWrapper.analyzeDetailed(
+      state = state,
+      budget = budget,
+      includePv = includePv,
+      includeCandidates = includeCandidates,
+      includeThreat = includeThreat,
+    )
+  }
+
+  private fun refreshLivePlayAnalysis(
+    stateBeforeMove: BoardState?,
+    playedMove: Move?,
+    playedSan: String?,
+    preMoveSnapshot: PositionAnalysisSnapshot?,
+    nextState: BoardState,
+    sanMoves: List<String>,
+  ) {
     evalJob?.cancel()
-    evalJob = viewModelScope.launch {
-      val curSettings = settings.value
-      val budget = DeviceMemoryAdvisor.computeSearchBudget(
-        requestedDepth = 3,
-        requestedTimeMs = 350L,
-        lowMemoryMode = curSettings.lowMemoryMode,
-        batterySavingMode = curSettings.batterySavingMode,
-        isLowRamHardware = memoryProfile.isLowRamHardware,
+    val curSettings = settings.value
+    val gSnapshot = _gameState.value
+    val involvesBot = gSnapshot.whiteOpponent is Opponent.Bot || gSnapshot.blackOpponent is Opponent.Bot
+    val needEngine = AnalysisPolicy.shouldRunLiveEngine(curSettings) || gSnapshot.trainingMode
+
+    if (!needEngine) {
+      val minimal = PositionAnalysisSnapshot(
+        openingInfo = if (curSettings.showOpeningInfo) OpeningBook.recognize(sanMoves) else null,
+        openingContinuations = if (curSettings.showOpeningInfo) OpeningBook.exploreContinuations(sanMoves) else emptyList(),
+        endgameInfo = MoveFeedbackAnalyzer.analyzeEndgame(nextState),
       )
-      val eval = engineService?.evaluatePosition(state, budget)
-        ?: fallbackEngineWrapper.evaluatePosition(state, budget)
-      if (_gameState.value.boardState == state) {
-        _gameState.update {
-          it.copy(
-            evalCpForWhite = eval.scoreCpForWhite,
-            evalMateIn = eval.mateInMoves,
+      _gameState.update {
+        it.copy(
+          liveAnalysis = minimal,
+          lastMoveFeedback = null,
+        )
+      }
+      return
+    }
+
+    evalJob = viewModelScope.launch {
+      _gameState.update { it.copy(liveAnalysis = it.liveAnalysis.copy(isAnalyzing = true)) }
+      val depth = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 2 else 3
+      val timeMs = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 220L else 360L
+
+      val (snapshot, afterOut) = AnalysisCoordinator.buildPositionSnapshot(
+        state = nextState,
+        sanMovesSoFar = sanMoves,
+        settings = curSettings,
+        memoryProfile = memoryProfile,
+        requestedDepth = depth,
+        requestedTimeMs = timeMs,
+        runDetailed = ::runEngineDetailed,
+      )
+
+      var feedbackEntry: MoveAnalysisEntry? = null
+      if (stateBeforeMove != null && playedMove != null && playedSan != null && afterOut != null &&
+        AnalysisPolicy.shouldComputeMoveFeedback(curSettings, involvesBot)
+      ) {
+        val beforeSign = if (stateBeforeMove.turn == PieceColor.WHITE) 1 else -1
+        val preBestMove = preMoveSnapshot?.bestMove
+        val preBestSan = preMoveSnapshot?.bestMoveSan
+        val evalBeforeWhite = preMoveSnapshot?.evalCpForWhite
+          ?: (engineService?.evaluateStaticForWhite(stateBeforeMove)
+            ?: fallbackEngineWrapper.evaluateStaticForWhite(stateBeforeMove))
+        val bestEvalBeforeForMover = evalBeforeWhite * beforeSign
+        val secondBestForMover = preMoveSnapshot?.candidateMoves?.getOrNull(1)?.evalCpForWhite?.times(beforeSign)
+        val isBook = OpeningBook.isKnownBookPrefix(sanMoves)
+
+        feedbackEntry = MoveFeedbackAnalyzer.evaluateMoveFeedback(
+          plyIndex = sanMoves.size,
+          stateBefore = stateBeforeMove,
+          move = playedMove,
+          san = playedSan,
+          stateAfter = nextState,
+          evalBeforeCpForWhite = evalBeforeWhite,
+          evalAfterCpForWhite = snapshot.evalCpForWhite,
+          mateInAfterForWhite = snapshot.mateInForWhite,
+          bestMoveInBefore = preBestMove,
+          bestMoveSan = preBestSan,
+          bestEvalBeforeForMoverCp = bestEvalBeforeForMover,
+          secondBestEvalBeforeForMoverCp = secondBestForMover,
+          isBookMove = isBook,
+          pvSanList = snapshot.pvSanList,
+          enableCriticalMoments = curSettings.enableCriticalMoments,
+        )
+      }
+
+      if (_gameState.value.boardState == nextState) {
+        _gameState.update { cur ->
+          cur.copy(
+            evalCpForWhite = snapshot.evalCpForWhite,
+            evalMateIn = snapshot.mateInForWhite,
+            liveAnalysis = snapshot,
+            lastMoveFeedback = if (AnalysisPolicy.showMoveFeedbackForGame(curSettings, involvesBot)) {
+              feedbackEntry
+            } else null,
+            moveFeedbackHistory = if (feedbackEntry != null) {
+              cur.moveFeedbackHistory + feedbackEntry
+            } else cur.moveFeedbackHistory,
           )
         }
       }
@@ -543,6 +707,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       repetitionCounts[key] = (repetitionCounts[key] ?: 0) + 1
     }
 
+    val newFeedbackHistory = g.moveFeedbackHistory.take(newMoves.size)
     _gameState.update {
       it.copy(
         boardState = targetState,
@@ -555,10 +720,13 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         lastMoveTo = newMoves.lastOrNull()?.move?.to,
         result = GameResult.IN_PROGRESS,
         termination = TerminationReason.NONE,
-        opening = OpeningBook.recognize(newMoves.map { m -> m.san }),
+        opening = if (settings.value.showOpeningInfo) OpeningBook.recognize(newMoves.map { m -> m.san }) else null,
         hintMove = null,
+        moveFeedbackHistory = newFeedbackHistory,
+        lastMoveFeedback = newFeedbackHistory.lastOrNull(),
       )
     }
+    refreshLivePlayAnalysis(null, null, null, null, targetState, newMoves.map { it.san })
   }
 
   fun requestTrainingHint() {
@@ -620,7 +788,16 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       if (botAdvantage <= 40 && g.moves.size >= 10) {
         acceptDraw()
       } else {
-        postMessage("Bot declined the draw offer.")
+        val botOpp = (if (humanIsWhite) g.blackOpponent else g.whiteOpponent) as? Opponent.Bot
+        val declineLine = botOpp?.let { BotDialogueEngine.onDrawDeclined(it.profile) }
+          ?: "Bot declined the draw offer."
+        _gameState.update {
+          it.copy(
+            botDialogue = declineLine,
+            botDialogueHistory = (it.botDialogueHistory + declineLine).takeLast(12),
+          )
+        }
+        postMessage(declineLine)
       }
     } else if (g.mode == GameMode.HUMAN_VS_HUMAN) {
       _gameState.update { it.copy(drawOfferPendingFrom = g.boardState.turn) }
@@ -644,6 +821,10 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
 
   fun declineDraw() {
     _gameState.update { it.copy(drawOfferPendingFrom = null) }
+  }
+
+  fun dismissBotDialogue() {
+    _gameState.update { it.copy(botDialogue = null) }
   }
 
   fun restartGame() {
@@ -805,30 +986,39 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       lastMoveFrom = parsed.moves.lastOrNull()?.move?.from,
       lastMoveTo = parsed.moves.lastOrNull()?.move?.to,
       result = parsed.result,
-      opening = parsed.opening,
+      opening = if (settings.value.showOpeningInfo) parsed.opening else null,
       replayIndex = parsed.moves.size,
     )
     _currentSection.value = AppSection.PLAY
+    refreshLivePlayAnalysis(null, null, null, null, history.last(), parsed.moves.map { it.san })
   }
 
   fun setReplayStep(step: Int) {
     val g = _gameState.value
     val clamped = step.coerceIn(0, g.stateHistory.lastIndex)
     val lastMove = if (clamped > 0) g.moves[clamped - 1].move else null
+    val entry = if (clamped > 0) g.moveFeedbackHistory.getOrNull(clamped - 1) else null
+    val involvesBot = g.whiteOpponent is Opponent.Bot || g.blackOpponent is Opponent.Bot
+    val showFeedback = AnalysisPolicy.showMoveFeedbackForGame(settings.value, involvesBot)
+    val targetBoard = g.stateHistory[clamped]
     _gameState.update {
       it.copy(
         replayIndex = clamped,
-        boardState = g.stateHistory[clamped],
+        boardState = targetBoard,
         lastMoveFrom = lastMove?.from,
         lastMoveTo = lastMove?.to,
+        lastMoveFeedback = if (showFeedback) entry else null,
       )
     }
+    refreshLivePlayAnalysis(null, null, null, null, targetBoard, g.moves.take(clamped).map { it.san })
   }
 
   fun exitReplayMode() {
     val g = _gameState.value
     val lastState = g.stateHistory.last()
     val lastMove = g.moves.lastOrNull()?.move
+    val involvesBot = g.whiteOpponent is Opponent.Bot || g.blackOpponent is Opponent.Bot
+    val showFeedback = AnalysisPolicy.showMoveFeedbackForGame(settings.value, involvesBot)
     _gameState.update {
       it.copy(
         replayIndex = null,
@@ -836,8 +1026,10 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         legalMoves = if (it.result == GameResult.IN_PROGRESS) ChessRules.legalMoves(lastState) else emptyList(),
         lastMoveFrom = lastMove?.from,
         lastMoveTo = lastMove?.to,
+        lastMoveFeedback = if (showFeedback) g.moveFeedbackHistory.lastOrNull() else null,
       )
     }
+    refreshLivePlayAnalysis(null, null, null, null, lastState, g.moves.map { it.san })
   }
 
   fun exportCurrentGamePgn(): String {
@@ -940,120 +1132,6 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   fun cancelTournament() {
     tournamentJob?.cancel()
     _tournamentProgress.update { it?.copy(isRunning = false) }
-  }
-
-  // endregion
-
-  // region Puzzles
-
-  private fun createPuzzleUiState(puzzle: ChessPuzzle): PuzzleUiState {
-    val board = ChessNotation.fromFen(puzzle.fen) ?: ChessRules.initialBoardState()
-    return PuzzleUiState(
-      puzzle = puzzle,
-      boardState = board,
-      stepIndex = 0,
-      legalMoves = ChessRules.legalMoves(board),
-    )
-  }
-
-  fun loadRandomPuzzle() {
-    val next = PuzzleCatalog.randomPuzzle(_puzzleState.value.puzzle.id)
-    _puzzleState.value = createPuzzleUiState(next)
-  }
-
-  fun loadPuzzleById(id: String) {
-    val found = PuzzleCatalog.puzzles.firstOrNull { it.id == id } ?: return
-    _puzzleState.value = createPuzzleUiState(found)
-  }
-
-  fun retryCurrentPuzzle() {
-    _puzzleState.value = createPuzzleUiState(_puzzleState.value.puzzle)
-  }
-
-  fun revealPuzzleHint() {
-    _puzzleState.update { it.copy(showHint = true) }
-  }
-
-  fun onPuzzleSquareTapped(square: Int) {
-    val p = _puzzleState.value
-    if (p.isSolved) return
-    val sel = p.selectedSquare
-    if (sel != null) {
-      val candidates = p.legalMoves.filter { it.from == sel && it.to == square }
-      if (candidates.isNotEmpty()) {
-        val expectedUci = p.puzzle.solutionUci.getOrNull(p.stepIndex) ?: return
-        val matched = candidates.firstOrNull { it.toUci() == expectedUci }
-        if (matched != null) {
-          applyCorrectPuzzleMove(matched)
-        } else {
-          soundHaptics.hapticTap(settings.value, strong = true)
-          _puzzleState.update {
-            it.copy(
-              selectedSquare = null,
-              hadMistake = true,
-              statusMessage = getApplication<Application>().getString(R.string.puzzles_wrong),
-            )
-          }
-        }
-        return
-      }
-    }
-
-    val piece = p.boardState.board[square]
-    if (piece != PieceCode.EMPTY && PieceCode.colorOf(piece) == p.boardState.turn) {
-      _puzzleState.update { it.copy(selectedSquare = square) }
-    } else {
-      _puzzleState.update { it.copy(selectedSquare = null) }
-    }
-  }
-
-  private fun applyCorrectPuzzleMove(move: Move) {
-    val p = _puzzleState.value
-    var nextBoard = ChessRules.applyMove(p.boardState, move)
-    var nextStep = p.stepIndex + 1
-    var lastFrom = move.from
-    var lastTo = move.to
-
-    // Play opponent forced reply if present
-    if (nextStep < p.puzzle.solutionUci.size) {
-      val replyUci = p.puzzle.solutionUci[nextStep]
-      val replyMove = ChessNotation.parseUciMove(nextBoard, replyUci)
-      if (replyMove != null) {
-        nextBoard = ChessRules.applyMove(nextBoard, replyMove)
-        lastFrom = replyMove.from
-        lastTo = replyMove.to
-        nextStep++
-      }
-    }
-
-    val solved = nextStep >= p.puzzle.solutionUci.size
-    val s = settings.value
-    if (solved) {
-      soundHaptics.playGameEndSound(s)
-      soundHaptics.hapticTap(s, strong = true)
-      viewModelScope.launch {
-        repository.recordPuzzleOutcome(p.puzzle.id, p.puzzle.rating, !p.hadMistake)
-      }
-    } else {
-      soundHaptics.playMoveSound(s)
-    }
-
-    _puzzleState.update {
-      it.copy(
-        boardState = nextBoard,
-        stepIndex = nextStep,
-        selectedSquare = null,
-        legalMoves = if (solved) emptyList() else ChessRules.legalMoves(nextBoard),
-        lastMoveFrom = lastFrom,
-        lastMoveTo = lastTo,
-        isSolved = solved,
-        statusMessage = if (solved) {
-          getApplication<Application>().getString(R.string.puzzles_solved_msg)
-        } else {
-          getApplication<Application>().getString(R.string.puzzles_correct)
-        },
-      )
-    }
   }
 
   // endregion
@@ -1226,9 +1304,351 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
 
   fun updateSettings(transform: (AppSettingsEntity) -> AppSettingsEntity) {
     viewModelScope.launch {
-      repository.updateSettings(transform)
+      val updated = repository.updateSettings(transform)
+      if (!AnalysisPolicy.shouldRunLiveEngine(updated)) {
+        evalJob?.cancel()
+        analysisEvalJob?.cancel()
+        engineService?.releaseSearchMemory()
+        fallbackEngineWrapper.releaseSearchMemory()
+        _gameState.update { state ->
+          state.copy(
+            opening = if (updated.showOpeningInfo) OpeningBook.recognize(state.moves.map { it.san }) else null,
+            liveAnalysis = PositionAnalysisSnapshot(
+              openingInfo = if (updated.showOpeningInfo) state.liveAnalysis.openingInfo else null,
+              openingContinuations = if (updated.showOpeningInfo) state.liveAnalysis.openingContinuations else emptyList(),
+            ),
+            lastMoveFeedback = null,
+          )
+        }
+      } else {
+        val g = _gameState.value
+        _gameState.update { state ->
+          state.copy(
+            opening = if (updated.showOpeningInfo) OpeningBook.recognize(state.moves.map { it.san }) else null,
+          )
+        }
+        refreshLivePlayAnalysis(null, null, null, null, g.boardState, g.moves.map { it.san })
+        if (_currentSection.value == AppSection.ANALYSIS) {
+          refreshAnalysisSnapshot()
+        }
+      }
     }
   }
+
+  // region FEN, Analysis Studio, Game Review, Chess Trainer & Practice Mode
+
+  fun openAnalysisForCurrentGame(autoRunReview: Boolean = false) {
+    val g = _gameState.value
+    val startReplay = g.replayIndex ?: g.stateHistory.lastIndex
+    val boardAtPly = g.stateHistory[startReplay.coerceIn(0, g.stateHistory.lastIndex)]
+    _analysisSession.value = AnalysisSessionState(
+      boardState = boardAtPly,
+      historyStates = g.stateHistory,
+      historyMoves = g.moves,
+      currentPly = startReplay,
+      legalMoves = ChessRules.legalMoves(boardAtPly),
+      isFlipped = g.isFlipped,
+      practiceActive = false,
+      practicePlayerColor = if (g.whiteOpponent is Opponent.Bot && g.blackOpponent is Opponent.Human) {
+        PieceColor.BLACK
+      } else PieceColor.WHITE,
+    )
+    _currentSection.value = AppSection.ANALYSIS
+    refreshAnalysisSnapshot()
+    if (autoRunReview && settings.value.enableGameAnalysis && g.moves.isNotEmpty()) {
+      runGameReview()
+    }
+  }
+
+  fun loadFenIntoPlay(rawFen: String, vsBot: BotProfile? = null): Boolean {
+    val parsed = ChessNotation.fromFen(rawFen)
+    if (parsed == null) {
+      postMessage("Invalid FEN string.")
+      return false
+    }
+    val err = MoveFeedbackAnalyzer.validateCustomPosition(parsed)
+    if (err != null) {
+      postMessage(err)
+      return false
+    }
+    val playerName = settings.value.playerName.ifBlank { "ChessHub Player" }
+    val wOpp = if (vsBot != null && parsed.turn == PieceColor.BLACK) Opponent.Bot(vsBot) else Opponent.Human(playerName)
+    val bOpp = if (vsBot != null && parsed.turn == PieceColor.WHITE) Opponent.Bot(vsBot) else {
+      if (vsBot != null) Opponent.Human(playerName) else Opponent.Human("Player 2")
+    }
+    startNewGame(
+      mode = if (vsBot != null) GameMode.HUMAN_VS_BOT else GameMode.HUMAN_VS_HUMAN,
+      white = wOpp,
+      black = bOpp,
+      timeControl = TimeControl.presets.last(),
+      trainingMode = vsBot != null,
+      navigateToPlay = true,
+      initialBoard = parsed,
+      customStartFen = rawFen.trim(),
+    )
+    return true
+  }
+
+  fun loadFenIntoAnalysis(rawFen: String, asPractice: Boolean = false, drill: TrainerDrill? = null): Boolean {
+    val parsed = ChessNotation.fromFen(rawFen)
+    if (parsed == null) {
+      postMessage("Invalid FEN string.")
+      return false
+    }
+    val err = MoveFeedbackAnalyzer.validateCustomPosition(parsed)
+    if (err != null) {
+      postMessage(err)
+      return false
+    }
+    gameReviewJob?.cancel()
+    _analysisSession.value = AnalysisSessionState(
+      boardState = parsed,
+      historyStates = listOf(parsed),
+      historyMoves = emptyList(),
+      currentPly = 0,
+      legalMoves = ChessRules.legalMoves(parsed),
+      practiceActive = asPractice,
+      practicePlayerColor = parsed.turn,
+      practiceCoachPrompt = drill?.goal ?: if (asPractice) "Find solid moves — the coach will flag mistakes and let you retry." else null,
+      activeDrill = drill,
+    )
+    _currentSection.value = AppSection.ANALYSIS
+    refreshAnalysisSnapshot()
+    return true
+  }
+
+  fun loadTrainerDrill(drill: TrainerDrill) {
+    loadFenIntoAnalysis(drill.fen, asPractice = true, drill = drill)
+  }
+
+  fun toggleAnalysisPracticeMode(active: Boolean) {
+    _analysisSession.update {
+      it.copy(
+        practiceActive = active,
+        practicePlayerColor = it.boardState.turn,
+        practiceCoachPrompt = if (active) "Practice active: play moves and get instant coach feedback." else null,
+        practiceRetryCount = 0,
+      )
+    }
+  }
+
+  fun flipAnalysisBoard() {
+    _analysisSession.update { it.copy(isFlipped = !it.isFlipped) }
+  }
+
+  fun stepAnalysisPly(targetPly: Int) {
+    val s = _analysisSession.value
+    val clamped = targetPly.coerceIn(0, s.historyStates.lastIndex)
+    val targetBoard = s.historyStates[clamped]
+    val entryAtPly = if (clamped > 0) s.reviewSummary.moveEntries.getOrNull(clamped - 1) else null
+    _analysisSession.update {
+      it.copy(
+        currentPly = clamped,
+        boardState = targetBoard,
+        legalMoves = ChessRules.legalMoves(targetBoard),
+        selectedSquare = null,
+        lastMoveFeedback = entryAtPly,
+      )
+    }
+    refreshAnalysisSnapshot()
+  }
+
+  fun onAnalysisSquareTapped(square: Int) {
+    val s = _analysisSession.value
+    val selected = s.selectedSquare
+    if (selected != null) {
+      val candidate = s.legalMoves.firstOrNull { it.from == selected && it.to == square }
+      if (candidate != null) {
+        playAnalysisMove(candidate)
+        return
+      }
+    }
+    val piece = s.boardState.board[square]
+    if (piece != PieceCode.EMPTY && PieceCode.colorOf(piece) == s.boardState.turn) {
+      soundHaptics.playUiClick(settings.value)
+      _analysisSession.update { it.copy(selectedSquare = square) }
+    } else {
+      _analysisSession.update { it.copy(selectedSquare = null) }
+    }
+  }
+
+  fun playAnalysisBookMove(san: String) {
+    val s = _analysisSession.value
+    val move = ChessNotation.parseSanMove(s.boardState, san) ?: return
+    playAnalysisMove(move)
+  }
+
+  fun playAnalysisMove(move: Move) {
+    val sessionBefore = _analysisSession.value
+    val stateBefore = sessionBefore.boardState
+    val legalBefore = sessionBefore.legalMoves
+    val san = ChessNotation.toSan(stateBefore, move, legalBefore)
+    val nextState = ChessRules.applyMove(stateBefore, move)
+    val fenAfter = ChessNotation.toFen(nextState)
+
+    val isCheck = ChessRules.isInCheck(nextState)
+    val curSettings = settings.value
+    when {
+      ChessRules.legalMoves(nextState).isEmpty() -> soundHaptics.playGameEndSound(curSettings)
+      isCheck -> soundHaptics.playCheckSound(curSettings)
+      move.capturedPiece != PieceCode.EMPTY || move.isEnPassant -> soundHaptics.playCaptureSound(curSettings)
+      else -> soundHaptics.playMoveSound(curSettings)
+    }
+
+    val truncatedStates = sessionBefore.historyStates.take(sessionBefore.currentPly + 1) + nextState
+    val truncatedMoves = sessionBefore.historyMoves.take(sessionBefore.currentPly) + RecordedMove(move, san, move.toUci(), fenAfter)
+
+    _analysisSession.update {
+      it.copy(
+        boardState = nextState,
+        historyStates = truncatedStates,
+        historyMoves = truncatedMoves,
+        currentPly = truncatedMoves.size,
+        selectedSquare = null,
+        legalMoves = ChessRules.legalMoves(nextState),
+      )
+    }
+
+    refreshAnalysisSnapshot(
+      stateBefore = stateBefore,
+      playedMove = move,
+      playedSan = san,
+      preSnapshot = sessionBefore.snapshot,
+    )
+  }
+
+  private fun refreshAnalysisSnapshot(
+    stateBefore: BoardState? = null,
+    playedMove: Move? = null,
+    playedSan: String? = null,
+    preSnapshot: PositionAnalysisSnapshot? = null,
+  ) {
+    analysisEvalJob?.cancel()
+    analysisEvalJob = viewModelScope.launch {
+      val s = _analysisSession.value
+      val curSettings = settings.value
+      val sanList = s.historyMoves.take(s.currentPly).map { it.san }
+      _analysisSession.update { it.copy(snapshot = it.snapshot.copy(isAnalyzing = AnalysisPolicy.shouldRunLiveEngine(curSettings))) }
+
+      val (snapshot, afterOut) = AnalysisCoordinator.buildPositionSnapshot(
+        state = s.boardState,
+        sanMovesSoFar = sanList,
+        settings = curSettings,
+        memoryProfile = memoryProfile,
+        requestedDepth = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 2 else 3,
+        requestedTimeMs = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 240L else 420L,
+        runDetailed = ::runEngineDetailed,
+      )
+
+      var feedback: MoveAnalysisEntry? = _analysisSession.value.lastMoveFeedback
+      var practiceCoachMsg = _analysisSession.value.practiceCoachPrompt
+      var practiceRetry = _analysisSession.value.practiceRetryCount
+
+      if (stateBefore != null && playedMove != null && playedSan != null && afterOut != null && curSettings.showMoveFeedback) {
+        val beforeSign = if (stateBefore.turn == PieceColor.WHITE) 1 else -1
+        val evalBeforeWhite = preSnapshot?.evalCpForWhite ?: fallbackEngineWrapper.evaluateStaticForWhite(stateBefore)
+        feedback = MoveFeedbackAnalyzer.evaluateMoveFeedback(
+          plyIndex = s.currentPly,
+          stateBefore = stateBefore,
+          move = playedMove,
+          san = playedSan,
+          stateAfter = s.boardState,
+          evalBeforeCpForWhite = evalBeforeWhite,
+          evalAfterCpForWhite = snapshot.evalCpForWhite,
+          mateInAfterForWhite = snapshot.mateInForWhite,
+          bestMoveInBefore = preSnapshot?.bestMove,
+          bestMoveSan = preSnapshot?.bestMoveSan,
+          bestEvalBeforeForMoverCp = evalBeforeWhite * beforeSign,
+          secondBestEvalBeforeForMoverCp = preSnapshot?.candidateMoves?.getOrNull(1)?.evalCpForWhite?.times(beforeSign),
+          isBookMove = OpeningBook.isKnownBookPrefix(sanList),
+          pvSanList = snapshot.pvSanList,
+          enableCriticalMoments = curSettings.enableCriticalMoments,
+        )
+
+        if (_analysisSession.value.practiceActive && stateBefore.turn == _analysisSession.value.practicePlayerColor) {
+          if (feedback.classification.isMistakeOrWorse) {
+            practiceRetry++
+            practiceCoachMsg = "${feedback.classification.label}! ${feedback.explanation} Tap Undo or keep exploring."
+          } else {
+            practiceCoachMsg = "${feedback.classification.label}! ${feedback.explanation}"
+            // Auto-reply as practice opponent if it's now opponent's turn and game continues
+            val replyMove = snapshot.bestMove
+            if (replyMove != null && s.boardState.turn != _analysisSession.value.practicePlayerColor) {
+              _analysisSession.update {
+                it.copy(
+                  snapshot = snapshot,
+                  lastMoveFeedback = feedback,
+                  practiceCoachPrompt = practiceCoachMsg,
+                  practiceRetryCount = practiceRetry,
+                )
+              }
+              delay(380L)
+              if (_analysisSession.value.boardState == s.boardState && _analysisSession.value.practiceActive) {
+                playAnalysisMove(replyMove)
+              }
+              return@launch
+            }
+          }
+        }
+      }
+
+      if (_analysisSession.value.boardState == s.boardState) {
+        _analysisSession.update {
+          it.copy(
+            snapshot = snapshot,
+            lastMoveFeedback = if (curSettings.showMoveFeedback) feedback else null,
+            practiceCoachPrompt = practiceCoachMsg,
+            practiceRetryCount = practiceRetry,
+          )
+        }
+      }
+    }
+  }
+
+  fun undoAnalysisMove() {
+    val s = _analysisSession.value
+    if (s.currentPly <= 0) return
+    stepAnalysisPly(s.currentPly - 1)
+  }
+
+  fun runGameReview() {
+    val curSettings = settings.value
+    if (!curSettings.enableGameAnalysis) {
+      postMessage("Enable Game Analysis in Settings to run full review.")
+      return
+    }
+    val s = _analysisSession.value
+    if (s.historyMoves.isEmpty()) {
+      postMessage("Play or load a game with moves first.")
+      return
+    }
+    gameReviewJob?.cancel()
+    gameReviewJob = viewModelScope.launch {
+      _analysisSession.update {
+        it.copy(reviewSummary = it.reviewSummary.copy(isRunning = true, progressFraction = 0.05f))
+      }
+      val summary = AnalysisCoordinator.reviewFullGame(
+        historyStates = s.historyStates,
+        moves = s.historyMoves,
+        settings = curSettings,
+        memoryProfile = memoryProfile,
+        runDetailed = ::runEngineDetailed,
+        onProgress = { partial ->
+          _analysisSession.update { it.copy(reviewSummary = partial) }
+        },
+      )
+      _analysisSession.update { it.copy(reviewSummary = summary) }
+      engineService?.releaseSearchMemory()
+      fallbackEngineWrapper.releaseSearchMemory()
+    }
+  }
+
+  fun cancelGameReview() {
+    gameReviewJob?.cancel()
+    _analysisSession.update { it.copy(reviewSummary = it.reviewSummary.copy(isRunning = false)) }
+  }
+
+  // endregion
 
   suspend fun exportAllPgns(): String = repository.exportAllPgns()
 
@@ -1255,6 +1675,8 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     clockTickJob?.cancel()
     tournamentJob?.cancel()
     evalJob?.cancel()
+    analysisEvalJob?.cancel()
+    gameReviewJob?.cancel()
     fallbackEngineWrapper.shutdown()
     if (isEngineServiceBound) {
       runCatching { getApplication<Application>().unbindService(engineServiceConnection) }
@@ -1262,6 +1684,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     }
     onlineClient.disconnect()
     musicController.release()
+    soundHaptics.release()
     super.onCleared()
   }
 }

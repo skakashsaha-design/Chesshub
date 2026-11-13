@@ -3,6 +3,9 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +31,10 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Handshake
 import androidx.compose.material.icons.filled.History
@@ -36,6 +42,7 @@ import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -43,7 +50,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -67,18 +73,26 @@ import androidx.compose.ui.unit.dp
 import com.example.ActiveGameUiState
 import com.example.GameMode
 import com.example.R
+import com.example.analysis.AnalysisPolicy
 import com.example.bots.BotCatalog
 import com.example.chess.BotProfile
+import com.example.chess.ChessNotation
 import com.example.chess.GameResult
 import com.example.chess.Opponent
 import com.example.chess.PieceColor
 import com.example.chess.PieceType
+import com.example.chess.RankSystem
 import com.example.chess.TerminationReason
 import com.example.database.AppSettingsEntity
 import com.example.database.GameSummaryRow
 import com.example.engine.StockfishEngineStatus
 import com.example.offline.ChessClockTracker
 import com.example.offline.TimeControl
+import com.example.ui.analysis.EnginePvAndCandidatesCard
+import com.example.ui.analysis.EvaluationBarStrip
+import com.example.ui.analysis.MoveFeedbackBanner
+import com.example.ui.analysis.TacticalAndEndgameCard
+import com.example.ui.analysis.buildBoardArrows
 import com.example.ui.board.BoardThemeOption
 import com.example.ui.board.ChessBoardView
 import com.example.ui.board.PieceStyleOption
@@ -115,14 +129,23 @@ fun PlayScreen(
   onReplaySavedGame: (Long) -> Unit,
   onDeleteSavedGame: (Long) -> Unit,
   onMessage: (String) -> Unit,
+  onDismissBotDialogue: () -> Unit = {},
+  onSwitchBot: () -> Unit = {},
+  onOpenAnalysis: (Boolean) -> Unit = {},
+  onImportFen: (String) -> Boolean = { false },
 ) {
   val context = LocalContext.current
   var showNewGameDialog by remember { mutableStateOf(false) }
   var showHistoryDialog by remember { mutableStateOf(false) }
   var showPgnDialog by remember { mutableStateOf(false) }
+  var showBotDialogueModal by remember { mutableStateOf(false) }
+  var showAnalysisDrawer by remember { mutableStateOf(false) }
 
   val topColor = if (gameState.isFlipped) PieceColor.WHITE else PieceColor.BLACK
   val bottomColor = if (gameState.isFlipped) PieceColor.BLACK else PieceColor.WHITE
+  val topOpponent = if (topColor == PieceColor.WHITE) gameState.whiteOpponent else gameState.blackOpponent
+  val bottomOpponent = if (bottomColor == PieceColor.WHITE) gameState.whiteOpponent else gameState.blackOpponent
+  val activeBotProfile = (topOpponent as? Opponent.Bot)?.profile ?: (bottomOpponent as? Opponent.Bot)?.profile
 
   Column(
     modifier = Modifier
@@ -140,9 +163,14 @@ fun PlayScreen(
       horizontalArrangement = Arrangement.SpaceBetween,
     ) {
       Column(modifier = Modifier.weight(1f)) {
-        val openingText = gameState.opening?.let { "${it.eco} • ${it.name}" }
-          ?: if (gameState.replayIndex != null) stringResource(R.string.play_replay_mode)
+        val openingText = if (settings.showOpeningInfo) {
+          gameState.opening?.let { "${it.eco} • ${it.name}" }
+            ?: if (gameState.replayIndex != null) stringResource(R.string.play_replay_mode)
+            else gameState.timeControl.label
+        } else {
+          if (gameState.replayIndex != null) stringResource(R.string.play_replay_mode)
           else gameState.timeControl.label
+        }
         Text(
           text = openingText,
           style = MaterialTheme.typography.labelLarge,
@@ -165,6 +193,9 @@ fun PlayScreen(
         }
       }
       Row {
+        IconButton(onClick = { onOpenAnalysis(false) }, modifier = Modifier.testTag("play_analyze_btn")) {
+          Icon(Icons.Filled.Analytics, contentDescription = stringResource(R.string.nav_analysis))
+        }
         IconButton(onClick = { showHistoryDialog = true }, modifier = Modifier.testTag("play_history_btn")) {
           Icon(Icons.Filled.History, contentDescription = stringResource(R.string.play_history))
         }
@@ -172,65 +203,91 @@ fun PlayScreen(
       }
     }
 
-    // Optional training evaluation bar
-    if (gameState.trainingMode) {
-      val mateIn = gameState.evalMateIn
-      val whiteAdv = when {
-        mateIn != null && mateIn > 0 -> 0.96f
-        mateIn != null && mateIn < 0 -> 0.04f
-        else -> ((gameState.evalCpForWhite / 800f) + 0.5f).coerceIn(0.05f, 0.95f)
-      }
-      val evalLabel = when {
-        mateIn != null && mateIn > 0 -> "M$mateIn"
-        mateIn != null && mateIn < 0 -> "-M${kotlin.math.abs(mateIn)}"
-        else -> "%+.1f".format(gameState.evalCpForWhite / 100f)
-      }
-      Column(
+    // Optional Evaluation Bar (strictly obeys Settings toggles)
+    if (AnalysisPolicy.showEvalBar(settings)) {
+      EvaluationBarStrip(
+        evalCpForWhite = gameState.liveAnalysis.evalCpForWhite,
+        mateIn = gameState.liveAnalysis.mateInForWhite,
+        isAnalyzing = gameState.liveAnalysis.isAnalyzing,
         modifier = Modifier
-          .fillMaxWidth()
           .widthIn(max = 580.dp)
           .padding(vertical = 2.dp),
-      ) {
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          LinearProgressIndicator(
-            progress = { whiteAdv },
-            modifier = Modifier.weight(1f).height(6.dp),
-          )
-          Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = evalLabel,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.testTag("training_eval_label"),
-          )
-        }
-        val summarySuffix = engineStatus.lastInfoSummary.takeIf { it.isNotBlank() }?.let { " • $it" } ?: ""
-        Text(
-          text = "${engineStatus.backend.label}$summarySuffix",
-          style = MaterialTheme.typography.labelSmall,
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-        )
-      }
+      )
     }
 
     // Top player strip
     PlayerClockBar(
-      opponent = if (topColor == PieceColor.WHITE) gameState.whiteOpponent else gameState.blackOpponent,
+      opponent = topOpponent,
+      humanElo = settings.localRating,
       timeMs = if (topColor == PieceColor.WHITE) gameState.whiteTimeMs else gameState.blackTimeMs,
       isUnlimited = gameState.timeControl.isUnlimited || gameState.trainingMode,
       isActiveTurn = gameState.boardState.turn == topColor && gameState.result == GameResult.IN_PROGRESS,
       isWhite = topColor == PieceColor.WHITE,
+      onClick = if (topOpponent is Opponent.Bot) ({ showBotDialogueModal = true }) else null,
       modifier = Modifier.widthIn(max = 580.dp),
     )
+
+    AnimatedVisibility(
+      visible = activeBotProfile != null && !gameState.botDialogue.isNullOrBlank(),
+      enter = fadeIn(),
+      exit = fadeOut(),
+    ) {
+      val bot = activeBotProfile
+      val quote = gameState.botDialogue
+      if (bot != null && !quote.isNullOrBlank()) {
+        Surface(
+          modifier = Modifier
+            .fillMaxWidth()
+            .widthIn(max = 580.dp)
+            .padding(top = 4.dp)
+            .clickable { showBotDialogueModal = true }
+            .testTag("bot_dialogue_banner"),
+          color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+          shape = MaterialTheme.shapes.small,
+        ) {
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Icon(
+              imageVector = Icons.Filled.ChatBubbleOutline,
+              contentDescription = null,
+              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = "${bot.name}: \"$quote\"",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSecondaryContainer,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f),
+            )
+            IconButton(
+              onClick = onDismissBotDialogue,
+              modifier = Modifier.size(32.dp),
+            ) {
+              Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Dismiss bot dialogue",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+              )
+            }
+          }
+        }
+      }
+    }
 
     Spacer(modifier = Modifier.height(4.dp))
 
     // Responsive Chessboard — gets maximum screen space
+    val boardArrows = remember(gameState.liveAnalysis, settings) {
+      buildBoardArrows(gameState.liveAnalysis, settings)
+    }
     ChessBoardView(
       boardState = gameState.boardState,
       selectedSquare = gameState.selectedSquare,
@@ -238,6 +295,7 @@ fun PlayScreen(
       lastMoveFrom = gameState.lastMoveFrom,
       lastMoveTo = gameState.lastMoveTo,
       hintMove = gameState.hintMove,
+      arrows = boardArrows,
       isFlipped = gameState.isFlipped,
       boardTheme = BoardThemeOption.fromKey(settings.boardTheme),
       pieceStyle = PieceStyleOption.fromKey(settings.pieceStyle),
@@ -254,13 +312,28 @@ fun PlayScreen(
 
     // Bottom player strip
     PlayerClockBar(
-      opponent = if (bottomColor == PieceColor.WHITE) gameState.whiteOpponent else gameState.blackOpponent,
+      opponent = bottomOpponent,
+      humanElo = settings.localRating,
       timeMs = if (bottomColor == PieceColor.WHITE) gameState.whiteTimeMs else gameState.blackTimeMs,
       isUnlimited = gameState.timeControl.isUnlimited || gameState.trainingMode,
       isActiveTurn = gameState.boardState.turn == bottomColor && gameState.result == GameResult.IN_PROGRESS,
       isWhite = bottomColor == PieceColor.WHITE,
+      onClick = if (bottomOpponent is Opponent.Bot) ({ showBotDialogueModal = true }) else null,
       modifier = Modifier.widthIn(max = 580.dp),
     )
+
+    // Move Feedback Banner (obeys Move Feedback & Bot Move Feedback toggles)
+    val involvesBot = topOpponent is Opponent.Bot || bottomOpponent is Opponent.Bot
+    val fbEntry = gameState.lastMoveFeedback
+    if (fbEntry != null && AnalysisPolicy.showMoveFeedbackForGame(settings, involvesBot)) {
+      Spacer(modifier = Modifier.height(4.dp))
+      MoveFeedbackBanner(
+        entry = fbEntry,
+        showRecommendedMove = settings.enableEngineAnalysis && (settings.showSuggestionArrow || settings.showEngineLine),
+        showCriticalBadge = settings.enableCriticalMoments,
+        modifier = Modifier.widthIn(max = 580.dp),
+      )
+    }
 
     // Result banner if finished
     if (gameState.result != GameResult.IN_PROGRESS) {
@@ -289,12 +362,22 @@ fun PlayScreen(
           TerminationReason.TIMEOUT -> stringResource(R.string.play_timeout)
           TerminationReason.NONE -> ""
         }
-        Text(
-          text = if (termLabel.isNotBlank()) "$resLabel • $termLabel" else resLabel,
-          style = MaterialTheme.typography.labelLarge,
-          color = MaterialTheme.colorScheme.onSecondaryContainer,
-          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Text(
+            text = if (termLabel.isNotBlank()) "$resLabel • $termLabel" else resLabel,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+          )
+          if (settings.enableGameAnalysis && gameState.moves.isNotEmpty()) {
+            OutlinedButton(onClick = { onOpenAnalysis(true) }) {
+              Text("Game Review")
+            }
+          }
+        }
       }
     }
 
@@ -385,6 +468,11 @@ fun PlayScreen(
       IconButton(onClick = { showPgnDialog = true }) {
         Icon(Icons.Filled.Share, contentDescription = stringResource(R.string.play_pgn))
       }
+      if (settings.enableEngineAnalysis && (settings.showEngineLine || settings.showCandidateMoves || settings.showTacticalSuggestions)) {
+        IconButton(onClick = { showAnalysisDrawer = true }, modifier = Modifier.testTag("play_insights_btn")) {
+          Icon(Icons.Filled.Lightbulb, contentDescription = "Engine Insights")
+        }
+      }
       IconButton(onClick = onRestart) {
         Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.play_restart))
       }
@@ -431,20 +519,48 @@ fun PlayScreen(
     )
   }
 
-  // PGN Dialog (View, Copy, Share, Import)
+  // PGN & FEN Dialog (View, Copy, Share, FEN Import/Export)
   if (showPgnDialog) {
     val pgnText = remember(gameState.moves, gameState.result) { onExportCurrentPgn() }
+    val currentFen = remember(gameState.boardState) { ChessNotation.toFen(gameState.boardState) }
+    var fenInput by remember(currentFen) { mutableStateOf(currentFen) }
     AlertDialog(
       onDismissRequest = { showPgnDialog = false },
-      title = { Text(stringResource(R.string.play_pgn)) },
+      title = { Text("PGN & FEN Import / Export") },
       text = {
-        OutlinedTextField(
-          value = pgnText,
-          onValueChange = {},
-          readOnly = true,
-          maxLines = 8,
-          modifier = Modifier.fillMaxWidth(),
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          OutlinedTextField(
+            value = pgnText,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("PGN") },
+            maxLines = 5,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          OutlinedTextField(
+            value = fenInput,
+            onValueChange = { fenInput = it },
+            label = { Text("Position FEN") },
+            maxLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+          )
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+              onClick = {
+                val cb = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cb?.setPrimaryClip(ClipData.newPlainText("ChessHub FEN", fenInput))
+                onMessage("FEN copied to clipboard")
+              },
+              modifier = Modifier.weight(1f),
+            ) { Text("Copy FEN") }
+            Button(
+              onClick = {
+                if (onImportFen(fenInput)) showPgnDialog = false
+              },
+              modifier = Modifier.weight(1f),
+            ) { Text("Load FEN") }
+          }
+        }
       },
       confirmButton = {
         Button(
@@ -471,6 +587,35 @@ fun PlayScreen(
     )
   }
 
+  if (showAnalysisDrawer) {
+    AlertDialog(
+      onDismissRequest = { showAnalysisDrawer = false },
+      title = { Text("Live Analysis Insights") },
+      text = {
+        Column(
+          modifier = Modifier.verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+          EnginePvAndCandidatesCard(snapshot = gameState.liveAnalysis, settings = settings)
+          TacticalAndEndgameCard(snapshot = gameState.liveAnalysis, settings = settings)
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            showAnalysisDrawer = false
+            onOpenAnalysis(false)
+          },
+        ) {
+          Text("Full Studio")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showAnalysisDrawer = false }) { Text(stringResource(R.string.close)) }
+      },
+    )
+  }
+
   if (showHistoryDialog) {
     GameHistoryDialog(
       games = historyGames,
@@ -488,11 +633,28 @@ fun PlayScreen(
 
   if (showNewGameDialog) {
     NewGameSetupDialog(
+      playerName = settings.playerName.ifBlank { "ChessHub Player" },
       onStart = { mode, w, b, tc ->
         showNewGameDialog = false
         onStartNewMatch(mode, w, b, tc)
       },
       onDismiss = { showNewGameDialog = false },
+    )
+  }
+
+  if (showBotDialogueModal && activeBotProfile != null) {
+    BotDialogueModal(
+      bot = activeBotProfile,
+      dialogueHistory = gameState.botDialogueHistory,
+      onRematch = {
+        showBotDialogueModal = false
+        onRestart()
+      },
+      onSwitchBot = {
+        showBotDialogueModal = false
+        onSwitchBot()
+      },
+      onDismiss = { showBotDialogueModal = false },
     )
   }
 }
@@ -510,16 +672,111 @@ private fun FilledNewGameButton(onClick: () -> Unit) {
 }
 
 @Composable
+private fun BotDialogueModal(
+  bot: BotProfile,
+  dialogueHistory: List<String>,
+  onRematch: () -> Unit,
+  onSwitchBot: () -> Unit,
+  onDismiss: () -> Unit,
+) {
+  val rank = remember(bot.rating) { RankSystem.rankForElo(bot.rating) }
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Filled.SmartToy, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column {
+          Text("${bot.name} (${bot.rating} Elo • ${rank.badge})")
+          Text(
+            text = "${bot.difficulty.label} • ${rank.title}",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+    },
+    text = {
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
+        Text(
+          text = bot.style,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+          text = "Engine: Depth ${bot.maxDepth} • Margin ${bot.randomnessCp}cp • ${bot.maxThinkTimeMs}ms",
+          style = MaterialTheme.typography.labelSmall,
+          color = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text("Match Dialogue", style = MaterialTheme.typography.labelLarge)
+        if (dialogueHistory.isEmpty()) {
+          Text(
+            text = "Ready to play!",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        } else {
+          dialogueHistory.asReversed().forEachIndexed { idx, line ->
+            Surface(
+              color = if (idx == 0) MaterialTheme.colorScheme.secondaryContainer
+              else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+              shape = MaterialTheme.shapes.small,
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text(
+                text = "\"$line\"",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+              )
+            }
+          }
+        }
+      }
+    },
+    confirmButton = {
+      Button(onClick = onRematch) {
+        Text(stringResource(R.string.play_restart))
+      }
+    },
+    dismissButton = {
+      Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        TextButton(onClick = onSwitchBot) {
+          Text(stringResource(R.string.nav_bots))
+        }
+        TextButton(onClick = onDismiss) {
+          Text(stringResource(R.string.close))
+        }
+      }
+    },
+  )
+}
+
+@Composable
 private fun PlayerClockBar(
   opponent: Opponent,
+  humanElo: Int,
   timeMs: Long,
   isUnlimited: Boolean,
   isActiveTurn: Boolean,
   isWhite: Boolean,
+  onClick: (() -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
+  val playerElo = when (opponent) {
+    is Opponent.Bot -> opponent.profile.rating
+    is Opponent.OnlinePlayer -> opponent.rating
+    is Opponent.Human -> humanElo
+  }
+  val rankBadge = playerElo?.let { RankSystem.rankForElo(it).badge }
   Card(
-    modifier = modifier.fillMaxWidth(),
+    modifier = modifier
+      .fillMaxWidth()
+      .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
     colors = CardDefaults.cardColors(
       containerColor = if (isActiveTurn) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
@@ -552,10 +809,10 @@ private fun PlayerClockBar(
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
         )
-        if (opponent is Opponent.Bot) {
+        if (playerElo != null && rankBadge != null) {
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = "(${opponent.profile.rating})",
+            text = "($playerElo • $rankBadge)",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
@@ -580,11 +837,12 @@ private fun PlayerClockBar(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NewGameSetupDialog(
+  playerName: String = "ChessHub Player",
   onStart: (GameMode, Opponent, Opponent, TimeControl) -> Unit,
   onDismiss: () -> Unit,
 ) {
   var selectedMode by remember { mutableStateOf(GameMode.HUMAN_VS_BOT) }
-  var selectedBot: BotProfile by remember { mutableStateOf(BotCatalog.presets[2]) }
+  var selectedBot: BotProfile by remember { mutableStateOf(BotCatalog.presets[4]) }
   var selectedColor by remember { mutableIntStateOf(0) } // 0=White, 1=Black, 2=Random
   var selectedTc by remember { mutableStateOf(TimeControl.presets[6]) } // 10+0
   var useCustomTc by remember { mutableStateOf(false) }
@@ -717,8 +975,8 @@ fun NewGameSetupDialog(
                 1 -> false
                 else -> kotlin.random.Random.nextBoolean()
               }
-              val w = if (playWhite) Opponent.Human("You") else Opponent.Bot(selectedBot)
-              val b = if (playWhite) Opponent.Bot(selectedBot) else Opponent.Human("You")
+              val w = if (playWhite) Opponent.Human(playerName) else Opponent.Bot(selectedBot)
+              val b = if (playWhite) Opponent.Bot(selectedBot) else Opponent.Human(playerName)
               onStart(GameMode.HUMAN_VS_BOT, w, b, tc)
             }
           }

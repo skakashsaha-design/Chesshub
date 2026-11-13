@@ -103,12 +103,13 @@
     <string name="bots_tab_training">প্রশিক্ষণ</string>
     <string name="bots_tab_tournament">টুর্নামেন্ট</string>
     <string name="bots_play_now">চ্যালেঞ্জ</string>
+    <string name="bots_custom_elo">টার্গেট Elo</string>
     <string name="bots_custom_depth">সার্চ গভীরতা</string>
     <string name="bots_custom_randomness">ভুলের মাত্রা</string>
     <string name="bots_custom_time">চিন্তার সময় (ms)</string>
     <string name="bots_start_bvb">বট বনাম বট দেখুন</string>
     <string name="bots_start_tournament">৪-বট রাউন্ড রবিন শুরু</string>
-    <string name="bots_training_hint">লাইভ মূল্যায়ন, সেরা চালের ইঙ্গিত এবং সীমাহীন আনডু সহ খেলুন।</string>
+    <string name="bots_training_hint">লাইভ মূল্যায়ন, সেরা চালের ইঙ্গিত এবং আনডু সহ খেলুন (আনরেটেড ট্রেনিং)।</string>
     <string name="bots_rating_label">রেটিং: %1$d</string>
 
     <!-- Puzzles -->
@@ -116,19 +117,35 @@
     <string name="puzzles_rating">পাজল রেটিং</string>
     <string name="puzzles_streak">ধারাবাহিকতা</string>
     <string name="puzzles_solved">সমাধান</string>
+    <string name="puzzles_attempts">চেষ্টা</string>
     <string name="puzzles_hint">ইঙ্গিত</string>
     <string name="puzzles_next">পরবর্তী পাজল</string>
     <string name="puzzles_random">র‍্যান্ডম</string>
     <string name="puzzles_retry">আবার চেষ্টা</string>
     <string name="puzzles_history">ইতিহাস</string>
-    <string name="puzzles_correct">সঠিক চাল!</string>
+    <string name="puzzles_correct">সঠিক চাল! পরবর্তী চাল খুঁজুন।</string>
     <string name="puzzles_solved_msg">পাজল সমাধান হয়েছে!</string>
+    <string name="puzzles_solved_clean">নিখুঁত সমাধান! স্ট্রিক +১</string>
     <string name="puzzles_wrong">সঠিক চাল নয়। আবার চেষ্টা করুন।</string>
+    <string name="puzzles_step_progress">চাল %1$d / %2$d</string>
+    <string name="puzzles_theme_all">সব</string>
+    <string name="puzzles_catalog_tab">পাজল তালিকা</string>
+    <string name="puzzles_attempts_tab">চেষ্টার ইতিহাস</string>
+    <string name="puzzles_no_attempts_yet">এই সেশনে এখনো কোনো পাজল চেষ্টা করা হয়নি।</string>
+    <string name="puzzles_mistakes_count">%1$d ভুল</string>
 
     <!-- Profiles, Lichess, Chess.com -->
     <string name="profiles_title">দাবা প্রোফাইল</string>
-    <string name="profiles_my_chesshub">আমার ChessHub</string>
-    <string name="profiles_local_rating">লোকাল রেটিং</string>
+    <string name="profiles_my_chesshub">আমার ChessHub প্রোফাইল</string>
+    <string name="profiles_player_name">খেলোয়াড়ের নাম</string>
+    <string name="profiles_save_name">নাম সেভ করুন</string>
+    <string name="profiles_local_rating">আমার Elo</string>
+    <string name="profiles_rank">র‍্যাঙ্ক</string>
+    <string name="profiles_win_rate">জয়ের হার</string>
+    <string name="profiles_elo_ladder">Elo ও র‍্যাঙ্ক তালিকা</string>
+    <string name="profiles_fair_play_title">ফেয়ার প্লে ও রেটিং নীতি</string>
+    <string name="profiles_fair_play_badge">ফেয়ার প্লে যাচাইকৃত</string>
+    <string name="profiles_fair_play_body">রেটেড খেলায় হিন্ট ও লাইভ ইভাল বার বন্ধ থাকে। বট ট্রেনিং আনরেটেড হিসেবে চিহ্নিত যাতে আপনার Elo এবং র‍্যাঙ্ক সঠিক থাকে।</string>
     <string name="profiles_games">খেলা</string>
     <string name="profiles_wins">জয়</string>
     <string name="profiles_losses">পরাজয়</string>
@@ -174,6 +191,7 @@
     <!-- Settings & About -->
     <string name="settings_title">সেটিংস</string>
     <string name="settings_appearance">থিম ও চেহারা</string>
+    <string name="settings_accent_color">অ্যাকসেন্ট থিম</string>
     <string name="settings_theme_light">হালকা</string>
     <string name="settings_theme_dark">গাঢ়</string>
     <string name="settings_theme_system">সিস্টেম</string>

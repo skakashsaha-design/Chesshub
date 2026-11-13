@@ -18,8 +18,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VerifiedUser
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,6 +30,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -39,6 +43,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -47,14 +52,25 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.PlatformProfileUiState
 import com.example.R
+import com.example.bots.BotCatalog
+import com.example.chess.RankSystem
 import com.example.database.AppSettingsEntity
 import com.example.lichess.PublicRecentGame
+import kotlin.math.roundToInt
+
+private data class LadderParticipant(
+  val name: String,
+  val elo: Int,
+  val source: String,
+  val isSelf: Boolean = false,
+)
 
 @Composable
 fun ProfilesScreen(
   settings: AppSettingsEntity,
   lichessProfile: PlatformProfileUiState,
   chessComProfile: PlatformProfileUiState,
+  onUpdatePlayerName: (String) -> Unit = {},
   onLinkLichess: (String) -> Unit,
   onRefreshLichess: () -> Unit,
   onUnlinkLichess: () -> Unit,
@@ -65,6 +81,41 @@ fun ProfilesScreen(
 ) {
   val context = LocalContext.current
   val totalLocal = settings.localWins + settings.localLosses + settings.localDraws
+  val winRatePct = if (totalLocal > 0) ((settings.localWins * 100f) / totalLocal).roundToInt() else 0
+  val myRank = remember(settings.localRating) { RankSystem.rankForElo(settings.localRating) }
+  val rankProgress = remember(settings.localRating) { RankSystem.progressToNextRank(settings.localRating) }
+
+  var isEditingName by remember { mutableStateOf(false) }
+  var draftName by remember(settings.playerName) { mutableStateOf(settings.playerName) }
+
+  val ladderRows = remember(
+    settings.playerName,
+    settings.localRating,
+    settings.lichessUsername,
+    lichessProfile.ratingsSummary,
+    settings.chessComUsername,
+    chessComProfile.ratingsSummary,
+  ) {
+    buildList {
+      add(
+        LadderParticipant(
+          name = settings.playerName.ifBlank { "ChessHub Player" },
+          elo = settings.localRating,
+          source = "You (Local)",
+          isSelf = true,
+        )
+      )
+      BotCatalog.presets.forEach { bot ->
+        add(
+          LadderParticipant(
+            name = bot.name,
+            elo = bot.rating,
+            source = "Bot • ${bot.difficulty.label}",
+          )
+        )
+      }
+    }.sortedByDescending { it.elo }
+  }
 
   LazyColumn(
     modifier = Modifier
@@ -82,7 +133,7 @@ fun ProfilesScreen(
       )
     }
 
-    // 1. MY CHESSHUB
+    // 1. MY CHESSHUB PROFILE (Name, My Elo, Rank, Win Rate, Stats)
     item {
       Card(
         modifier = Modifier
@@ -90,14 +141,97 @@ fun ProfilesScreen(
           .widthIn(max = 600.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)),
       ) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text(
-            text = stringResource(R.string.profiles_my_chesshub),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-          )
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                text = stringResource(R.string.profiles_my_chesshub),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+              )
+              Text(
+                text = settings.playerName.ifBlank { "ChessHub Player" },
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+              )
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Surface(
+                color = Color(myRank.colorHex).copy(alpha = 0.2f),
+                shape = MaterialTheme.shapes.small,
+              ) {
+                Text(
+                  text = "${myRank.badge} • ${myRank.title}",
+                  style = MaterialTheme.typography.labelMedium,
+                  fontWeight = FontWeight.Bold,
+                  color = Color(myRank.colorHex),
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+              }
+              IconButton(
+                onClick = { isEditingName = !isEditingName },
+                modifier = Modifier.testTag("edit_player_name_btn"),
+              ) {
+                Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.profiles_player_name))
+              }
+            }
+          }
+
+          if (isEditingName) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+              OutlinedTextField(
+                value = draftName,
+                onValueChange = { draftName = it },
+                label = { Text(stringResource(R.string.profiles_player_name)) },
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag("player_name_input"),
+              )
+              Button(
+                onClick = {
+                  onUpdatePlayerName(draftName)
+                  isEditingName = false
+                },
+                enabled = draftName.isNotBlank(),
+                modifier = Modifier.testTag("save_player_name_btn"),
+              ) {
+                Text(stringResource(R.string.profiles_save_name))
+              }
+            }
+          }
+
+          // Progress bar to next rank
+          Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+              Text(
+                text = "${stringResource(R.string.profiles_local_rating)}: ${settings.localRating}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+              )
+              Text(
+                text = myRank.nextThreshold?.let { "Next rank: $it Elo" } ?: "Top Rank Achieved",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
+            LinearProgressIndicator(
+              progress = { rankProgress },
+              modifier = Modifier.fillMaxWidth().height(6.dp),
+            )
+          }
+
           Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             StatBlock(stringResource(R.string.profiles_local_rating), settings.localRating.toString())
+            StatBlock(stringResource(R.string.profiles_win_rate), "$winRatePct%")
             StatBlock(stringResource(R.string.profiles_games), totalLocal.toString())
             StatBlock(stringResource(R.string.profiles_wins), settings.localWins.toString())
             StatBlock(stringResource(R.string.profiles_losses), settings.localLosses.toString())
@@ -107,7 +241,132 @@ fun ProfilesScreen(
       }
     }
 
-    // 2. LICHESS
+    // 2. FAIR PLAY & RATING INTEGRITY
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .widthIn(max = 600.dp),
+      ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+              Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+              Text(
+                text = stringResource(R.string.profiles_fair_play_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+              )
+            }
+            Surface(
+              color = MaterialTheme.colorScheme.primaryContainer,
+              shape = MaterialTheme.shapes.small,
+            ) {
+              Text(
+                text = stringResource(R.string.profiles_fair_play_badge),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+              )
+            }
+          }
+          Text(
+            text = stringResource(R.string.profiles_fair_play_body),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
+        }
+      }
+    }
+
+    // 3. ELO & RANK LADDER (My Elo vs Other Bots & Ranks)
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .widthIn(max = 600.dp),
+      ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(Icons.Filled.EmojiEvents, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+            Text(
+              text = stringResource(R.string.profiles_elo_ladder),
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+            )
+          }
+          ladderRows.forEachIndexed { idx, row ->
+            val rank = RankSystem.rankForElo(row.elo)
+            Surface(
+              color = if (row.isSelf) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+              else Color.Transparent,
+              shape = MaterialTheme.shapes.small,
+            ) {
+              Row(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+              ) {
+                Row(
+                  verticalAlignment = Alignment.CenterVertically,
+                  horizontalArrangement = Arrangement.spacedBy(8.dp),
+                  modifier = Modifier.weight(1f),
+                ) {
+                  Text(
+                    text = "#${idx + 1}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  )
+                  Column {
+                    Text(
+                      text = row.name,
+                      style = MaterialTheme.typography.bodyMedium,
+                      fontWeight = if (row.isSelf) FontWeight.Bold else FontWeight.Medium,
+                      maxLines = 1,
+                      overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                      text = row.source,
+                      style = MaterialTheme.typography.labelSmall,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                  }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  Surface(
+                    color = Color(rank.colorHex).copy(alpha = 0.16f),
+                    shape = MaterialTheme.shapes.small,
+                  ) {
+                    Text(
+                      text = rank.badge,
+                      style = MaterialTheme.typography.labelSmall,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(rank.colorHex),
+                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                  }
+                  Text(
+                    text = "${row.elo}",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                  )
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. LICHESS
     item {
       PlatformProfileCard(
         platformTitle = "LICHESS",
@@ -124,7 +383,7 @@ fun ProfilesScreen(
       )
     }
 
-    // 3. CHESS.COM
+    // 5. CHESS.COM
     item {
       PlatformProfileCard(
         platformTitle = "CHESS.COM",

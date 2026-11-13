@@ -38,9 +38,11 @@ class ChessHubRepository(
     return initial
   }
 
-  suspend fun updateSettings(transform: (AppSettingsEntity) -> AppSettingsEntity) {
+  suspend fun updateSettings(transform: (AppSettingsEntity) -> AppSettingsEntity): AppSettingsEntity {
     val current = ensureInitializedSettings()
-    settingsDao.upsert(transform(current))
+    val updated = transform(current)
+    settingsDao.upsert(updated)
+    return updated
   }
 
   suspend fun saveGame(game: GameEntity): Long = gameDao.upsert(game)

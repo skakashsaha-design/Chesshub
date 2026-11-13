@@ -1,5 +1,7 @@
 package com.example
 
+import com.example.analysis.MoveAnalysisEntry
+import com.example.analysis.PositionAnalysisSnapshot
 import com.example.chess.BoardState
 import com.example.chess.ChessRules
 import com.example.chess.GameResult
@@ -17,6 +19,7 @@ enum class AppSection {
   HOME,
   PLAY,
   BOTS,
+  ANALYSIS,
   ONLINE,
   PUZZLES,
   PROFILES,
@@ -62,20 +65,47 @@ data class ActiveGameUiState(
   val hintMove: Move? = null,
   val replayIndex: Int? = null, // null = live play, 0..moves.size = replay step
   val startedAtMillis: Long = System.currentTimeMillis(),
+  val botDialogue: String? = null,
+  val botDialogueHistory: List<String> = emptyList(),
+  val liveAnalysis: PositionAnalysisSnapshot = PositionAnalysisSnapshot(),
+  val moveFeedbackHistory: List<MoveAnalysisEntry> = emptyList(),
+  val lastMoveFeedback: MoveAnalysisEntry? = null,
+  val customStartFen: String? = null,
+)
+
+data class PuzzleAttemptRecord(
+  val puzzleId: String,
+  val title: String,
+  val theme: String,
+  val rating: Int,
+  val solved: Boolean,
+  val solvedCleanly: Boolean,
+  val attemptsCount: Int,
+  val wrongCount: Int,
+  val timestampMillis: Long = System.currentTimeMillis(),
 )
 
 data class PuzzleUiState(
   val puzzle: ChessPuzzle = PuzzleCatalog.puzzles.first(),
   val boardState: BoardState = ChessRules.initialBoardState(),
+  val playerColor: PieceColor = PieceColor.WHITE,
   val stepIndex: Int = 0,
+  val totalPlayerMoves: Int = 1,
   val selectedSquare: Int? = null,
   val legalMoves: List<Move> = emptyList(),
+  val pendingPromotionFrom: Int? = null,
+  val pendingPromotionTo: Int? = null,
   val lastMoveFrom: Int? = null,
   val lastMoveTo: Int? = null,
+  val hintMove: Move? = null,
   val showHint: Boolean = false,
   val statusMessage: String? = null,
   val isSolved: Boolean = false,
   val hadMistake: Boolean = false,
+  val attemptsOnCurrent: Int = 0,
+  val wrongAttemptsOnCurrent: Int = 0,
+  val selectedThemeFilter: String = "All",
+  val sessionAttempts: List<PuzzleAttemptRecord> = emptyList(),
 )
 
 data class PlatformProfileUiState(

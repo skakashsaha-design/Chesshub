@@ -12,6 +12,7 @@
     <string name="nav_music">Music</string>
     <string name="nav_settings">Settings</string>
     <string name="nav_more">More</string>
+    <string name="nav_analysis">Analysis</string>
 
     <!-- Home -->
     <string name="home_subtitle">Fast, offline-first chess built for every phone</string>
@@ -20,6 +21,7 @@
     <string name="home_local_2_player">Local 2 Player</string>
     <string name="home_online_chess">Online Chess</string>
     <string name="home_puzzles">Tactical Puzzles</string>
+    <string name="home_analysis_lab">Analysis, Review &amp; Trainer</string>
     <string name="home_continue_game">Continue Game</string>
     <string name="home_recent_games">Recent Games</string>
     <string name="home_no_recent_games">No saved games yet. Start a match to build your history.</string>
@@ -103,12 +105,13 @@
     <string name="bots_tab_training">Training</string>
     <string name="bots_tab_tournament">Tournaments</string>
     <string name="bots_play_now">Challenge</string>
+    <string name="bots_custom_elo">Target Elo</string>
     <string name="bots_custom_depth">Search Depth</string>
     <string name="bots_custom_randomness">Mistake Margin</string>
     <string name="bots_custom_time">Think Limit (ms)</string>
     <string name="bots_start_bvb">Watch Bot vs Bot</string>
     <string name="bots_start_tournament">Run 4-Bot Round Robin</string>
-    <string name="bots_training_hint">Play with live evaluation bar, best-move hint, and unlimited undo.</string>
+    <string name="bots_training_hint">Play with live evaluation bar, best-move hint, and unlimited undo (Unrated Training).</string>
     <string name="bots_rating_label">Rating: %1$d</string>
 
     <!-- Puzzles -->
@@ -116,19 +119,35 @@
     <string name="puzzles_rating">Puzzle Rating</string>
     <string name="puzzles_streak">Streak</string>
     <string name="puzzles_solved">Solved</string>
+    <string name="puzzles_attempts">Attempts</string>
     <string name="puzzles_hint">Hint</string>
     <string name="puzzles_next">Next Puzzle</string>
     <string name="puzzles_random">Random</string>
     <string name="puzzles_retry">Retry</string>
     <string name="puzzles_history">History</string>
-    <string name="puzzles_correct">Correct! Well spotted.</string>
+    <string name="puzzles_correct">Correct! Find the follow-up.</string>
     <string name="puzzles_solved_msg">Puzzle Solved!</string>
+    <string name="puzzles_solved_clean">Clean solve! Streak +1</string>
     <string name="puzzles_wrong">Not the best move. Try again.</string>
+    <string name="puzzles_step_progress">Move %1$d of %2$d</string>
+    <string name="puzzles_theme_all">All</string>
+    <string name="puzzles_catalog_tab">Puzzles</string>
+    <string name="puzzles_attempts_tab">Attempts</string>
+    <string name="puzzles_no_attempts_yet">No puzzle attempts recorded in this session yet.</string>
+    <string name="puzzles_mistakes_count">%1$d wrong</string>
 
     <!-- Profiles, Lichess, Chess.com -->
     <string name="profiles_title">Chess Profiles</string>
-    <string name="profiles_my_chesshub">My ChessHub</string>
-    <string name="profiles_local_rating">Local Rating</string>
+    <string name="profiles_my_chesshub">My ChessHub Profile</string>
+    <string name="profiles_player_name">Player Name</string>
+    <string name="profiles_save_name">Save Name</string>
+    <string name="profiles_local_rating">My Elo</string>
+    <string name="profiles_rank">Rank</string>
+    <string name="profiles_win_rate">Win Rate</string>
+    <string name="profiles_elo_ladder">Elo &amp; Rank Ladder</string>
+    <string name="profiles_fair_play_title">Fair Play &amp; Rating Integrity</string>
+    <string name="profiles_fair_play_badge">Fair Play Verified</string>
+    <string name="profiles_fair_play_body">Rated games disable hints and live evaluation bars. Bot Training is clearly marked unrated so your Elo and Rank reflect genuine skill without external engine assistance.</string>
     <string name="profiles_games">Games</string>
     <string name="profiles_wins">Wins</string>
     <string name="profiles_losses">Losses</string>
@@ -174,6 +193,7 @@
     <!-- Settings & About -->
     <string name="settings_title">Settings</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_accent_color">Accent Theme</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_system">System</string>
@@ -192,6 +212,20 @@
     <string name="settings_sound_end">Game-End Sound</string>
     <string name="settings_sound_ui">UI Sound</string>
     <string name="settings_sound_music">Background Music</string>
+    <string name="settings_analysis_controls">Analysis &amp; Feedback Controls</string>
+    <string name="toggle_eval_bar">Evaluation Bar</string>
+    <string name="toggle_threat_arrow">Threat Arrow</string>
+    <string name="toggle_suggestion_arrow">Suggestion Arrow</string>
+    <string name="toggle_engine_line">Engine Line</string>
+    <string name="toggle_move_feedback">Move Feedback</string>
+    <string name="toggle_bot_move_feedback">Bot Move Feedback</string>
+    <string name="toggle_game_analysis">Game Analysis</string>
+    <string name="toggle_eval_graph">Evaluation Graph</string>
+    <string name="toggle_candidate_moves">Candidate Moves</string>
+    <string name="toggle_tactical_suggestions">Tactical Suggestions</string>
+    <string name="toggle_critical_moments">Critical Moment Detection</string>
+    <string name="toggle_opening_info">Opening Information</string>
+    <string name="toggle_engine_analysis">Engine Analysis</string>
     <string name="settings_performance">Performance &amp; 1 GB RAM</string>
     <string name="settings_low_memory">Low Memory Mode</string>
     <string name="settings_low_memory_desc">Caps bot search depth &amp; table size, frees memory after moves</string>

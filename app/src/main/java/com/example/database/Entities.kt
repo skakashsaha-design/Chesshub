@@ -53,8 +53,9 @@ data class GameSummaryRow(
 data class AppSettingsEntity(
   @PrimaryKey val id: Int = 1,
   val themeMode: String = "SYSTEM", // LIGHT, DARK, SYSTEM
-  val boardTheme: String = "WALNUT", // WALNUT, SLATE, TOURNAMENT, NORDIC
-  val pieceStyle: String = "CLASSIC", // CLASSIC, MODERN, MINIMAL
+  val appAccent: String = "EMERALD", // EMERALD, COBALT, AMBER, CRIMSON, VIOLET
+  val boardTheme: String = "WALNUT", // WALNUT, SLATE, TOURNAMENT, NORDIC, OBSIDIAN, ROSEWOOD, OCEAN, SANDSTONE
+  val pieceStyle: String = "CLASSIC", // CLASSIC, MODERN, MINIMAL, ROYAL_GOLD, HIGH_CONTRAST, OUTLINE
   val showCoordinates: Boolean = true,
   val animateMoves: Boolean = true,
   val confirmMoves: Boolean = false,
@@ -70,6 +71,7 @@ data class AppSettingsEntity(
   val reduceAnimations: Boolean = false,
   val batterySavingMode: Boolean = false,
   val languageCode: String = "en", // en, bn
+  val playerName: String = "ChessHub Player",
   val lichessUsername: String = "",
   val chessComUsername: String = "",
   val localRating: Int = 1200,
@@ -83,6 +85,20 @@ data class AppSettingsEntity(
   val musicVolume: Float = 0.8f,
   val musicShuffle: Boolean = false,
   val musicRepeatMode: String = "OFF", // OFF, ALL, ONE
+  // Individual Analysis & Feedback ON/OFF Controls
+  val showEvalBar: Boolean = true,
+  val showThreatArrow: Boolean = true,
+  val showSuggestionArrow: Boolean = true,
+  val showEngineLine: Boolean = true,
+  val showMoveFeedback: Boolean = true,
+  val showBotMoveFeedback: Boolean = true,
+  val enableGameAnalysis: Boolean = true,
+  val showEvalGraph: Boolean = true,
+  val showCandidateMoves: Boolean = true,
+  val showTacticalSuggestions: Boolean = true,
+  val enableCriticalMoments: Boolean = true,
+  val showOpeningInfo: Boolean = true,
+  val enableEngineAnalysis: Boolean = true,
 )
 
 @Entity(tableName = "cached_profiles")

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Home
@@ -49,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,7 +64,9 @@ import com.example.bots.BotCatalog
 import com.example.chess.Opponent
 import com.example.music.RepeatMode
 import com.example.offline.TimeControl
+import com.example.puzzles.PuzzlesViewModel
 import com.example.settings.LocaleHelper
+import com.example.ui.screens.AnalysisSuiteScreen
 import com.example.ui.screens.BotsScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.MusicScreen
@@ -76,6 +80,7 @@ import com.example.ui.theme.ChessHubTheme
 class MainActivity : ComponentActivity() {
 
   private val viewModel: ChessHubViewModel by viewModels()
+  private val puzzlesViewModel: PuzzlesViewModel by viewModels()
 
   override fun attachBaseContext(newBase: Context) {
     val prefs = newBase.getSharedPreferences("chesshub_boot_prefs", Context.MODE_PRIVATE)
@@ -94,9 +99,13 @@ class MainActivity : ComponentActivity() {
         else -> isSystemInDarkTheme()
       }
 
-      ChessHubTheme(darkTheme = darkTheme) {
+      ChessHubTheme(
+        darkTheme = darkTheme,
+        accentKey = settings.appAccent,
+      ) {
         ChessHubAppRoot(
           viewModel = viewModel,
+          puzzlesViewModel = puzzlesViewModel,
           onApplyLanguage = { code ->
             getSharedPreferences("chesshub_boot_prefs", Context.MODE_PRIVATE)
               .edit()
@@ -123,14 +132,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ChessHubAppRoot(
   viewModel: ChessHubViewModel,
+  puzzlesViewModel: PuzzlesViewModel,
   onApplyLanguage: (String) -> Unit,
   onSharePgn: (String) -> Unit,
 ) {
   val currentSection by viewModel.currentSection.collectAsStateWithLifecycle()
   val settings by viewModel.settings.collectAsStateWithLifecycle()
   val gameState by viewModel.gameState.collectAsStateWithLifecycle()
-  val puzzleState by viewModel.puzzleState.collectAsStateWithLifecycle()
-  val puzzleProgress by viewModel.puzzleProgress.collectAsStateWithLifecycle()
   val recentGames by viewModel.recentGames.collectAsStateWithLifecycle()
   val unfinishedGame by viewModel.latestUnfinishedGame.collectAsStateWithLifecycle()
   val historyGames by viewModel.historyGames.collectAsStateWithLifecycle()
@@ -143,10 +151,12 @@ fun ChessHubAppRoot(
   val onlineState by viewModel.onlineClient.state.collectAsStateWithLifecycle()
   val musicState by viewModel.musicController.state.collectAsStateWithLifecycle()
   val engineStatus by viewModel.engineStatus.collectAsStateWithLifecycle()
+  val analysisSession by viewModel.analysisSession.collectAsStateWithLifecycle()
   val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
 
   val snackbarHostState = remember { SnackbarHostState() }
   var showMoreSheet by remember { mutableStateOf(false) }
+  var analysisInitialTab by remember { mutableIntStateOf(0) }
 
   LaunchedEffect(snackbarMessage) {
     val msg = snackbarMessage ?: return@LaunchedEffect
@@ -198,6 +208,7 @@ fun ChessHubAppRoot(
             )
             NavigationBarItem(
               selected = currentSection in setOf(
+                AppSection.ANALYSIS,
                 AppSection.ONLINE,
                 AppSection.PROFILES,
                 AppSection.MUSIC,
@@ -222,6 +233,10 @@ fun ChessHubAppRoot(
             SectionItem(AppSection.HOME, Icons.Filled.Home, stringResource(R.string.nav_home), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.PLAY, Icons.Filled.GridView, stringResource(R.string.nav_play), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.BOTS, Icons.Filled.SmartToy, stringResource(R.string.nav_bots), currentSection, viewModel::navigateTo)
+            SectionItem(AppSection.ANALYSIS, Icons.Filled.Analytics, stringResource(R.string.nav_analysis), currentSection) {
+              analysisInitialTab = 0
+              viewModel.navigateTo(it)
+            }
             SectionItem(AppSection.ONLINE, Icons.Filled.Public, stringResource(R.string.nav_online), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.PUZZLES, Icons.Filled.Extension, stringResource(R.string.nav_puzzles), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.PROFILES, Icons.Filled.Person, stringResource(R.string.nav_profiles), currentSection, viewModel::navigateTo)
@@ -250,7 +265,10 @@ fun ChessHubAppRoot(
               },
               onContinueGame = { viewModel.resumeUnfinishedGame(it) },
               onReplayGame = { viewModel.loadGameForReplay(it) },
-              onNavigate = { viewModel.navigateTo(it) },
+              onNavigate = { sec ->
+                if (sec == AppSection.ANALYSIS) analysisInitialTab = 0
+                viewModel.navigateTo(sec)
+              },
               onToggleMusic = { viewModel.musicController.togglePlayPause() },
             )
 
@@ -287,17 +305,37 @@ fun ChessHubAppRoot(
               onReplaySavedGame = viewModel::loadGameForReplay,
               onDeleteSavedGame = viewModel::deleteGame,
               onMessage = viewModel::postMessage,
+              onDismissBotDialogue = viewModel::dismissBotDialogue,
+              onSwitchBot = { viewModel.navigateTo(AppSection.BOTS) },
+              onOpenAnalysis = { openReviewTab ->
+                analysisInitialTab = if (openReviewTab) 1 else 0
+                viewModel.openAnalysisForCurrentGame(autoRunReview = openReviewTab)
+              },
+              onImportFen = { fen -> viewModel.loadFenIntoPlay(fen) },
             )
 
             AppSection.BOTS -> BotsScreen(
               botStats = botStats,
               tournamentProgress = tournamentProgress,
               engineStatus = engineStatus,
+              settings = settings,
               onPlayVsBot = { bot, training ->
                 viewModel.startNewGame(
                   mode = if (training) GameMode.BOT_TRAINING else GameMode.HUMAN_VS_BOT,
-                  white = Opponent.Human("You"),
+                  white = Opponent.Human(settings.playerName.ifBlank { "ChessHub Player" }),
                   black = Opponent.Bot(bot),
+                  timeControl = if (training) TimeControl.presets.last() else TimeControl.presets[6],
+                  trainingMode = training,
+                )
+              },
+              onPlayVsBotWithColor = { bot, training, playWhiteChoice ->
+                val playWhite = playWhiteChoice ?: kotlin.random.Random.nextBoolean()
+                val human = Opponent.Human(settings.playerName.ifBlank { "ChessHub Player" })
+                val botOpp = Opponent.Bot(bot)
+                viewModel.startNewGame(
+                  mode = if (training) GameMode.BOT_TRAINING else GameMode.HUMAN_VS_BOT,
+                  white = if (playWhite) human else botOpp,
+                  black = if (playWhite) botOpp else human,
                   timeControl = if (training) TimeControl.presets.last() else TimeControl.presets[6],
                   trainingMode = training,
                 )
@@ -324,20 +362,21 @@ fun ChessHubAppRoot(
             )
 
             AppSection.PUZZLES -> PuzzlesScreen(
-              puzzleState = puzzleState,
-              settings = settings,
-              progressList = puzzleProgress,
-              onSquareTap = viewModel::onPuzzleSquareTapped,
-              onHint = viewModel::revealPuzzleHint,
-              onRetry = viewModel::retryCurrentPuzzle,
-              onRandomPuzzle = viewModel::loadRandomPuzzle,
-              onSelectPuzzle = viewModel::loadPuzzleById,
+              viewModel = puzzlesViewModel,
+              settingsOverride = settings,
             )
 
             AppSection.PROFILES -> ProfilesScreen(
               settings = settings,
               lichessProfile = lichessProfile,
               chessComProfile = chessComProfile,
+              onUpdatePlayerName = { name ->
+                val clean = name.trim().take(24)
+                if (clean.isNotEmpty()) {
+                  viewModel.updateSettings { it.copy(playerName = clean) }
+                  viewModel.postMessage("Profile name updated")
+                }
+              },
               onLinkLichess = viewModel::linkAndRefreshLichess,
               onRefreshLichess = { viewModel.refreshLichess() },
               onUnlinkLichess = viewModel::unlinkLichess,
@@ -374,6 +413,25 @@ fun ChessHubAppRoot(
               onPermissionDeniedMessage = viewModel::postMessage,
             )
 
+            AppSection.ANALYSIS -> AnalysisSuiteScreen(
+              session = analysisSession,
+              settings = settings,
+              initialTab = analysisInitialTab,
+              onSquareTap = viewModel::onAnalysisSquareTapped,
+              onUndoMove = viewModel::undoAnalysisMove,
+              onStepPly = viewModel::stepAnalysisPly,
+              onFlipBoard = viewModel::flipAnalysisBoard,
+              onPlaySuggestedMove = viewModel::playAnalysisMove,
+              onPlayBookMove = viewModel::playAnalysisBookMove,
+              onRunGameReview = viewModel::runGameReview,
+              onCancelGameReview = viewModel::cancelGameReview,
+              onLoadDrill = viewModel::loadTrainerDrill,
+              onTogglePracticeMode = viewModel::toggleAnalysisPracticeMode,
+              onLoadFenToAnalysis = { fen -> viewModel.loadFenIntoAnalysis(fen) },
+              onPlayFenVsBot = { fen, bot -> viewModel.loadFenIntoPlay(fen, bot) },
+              onMessage = viewModel::postMessage,
+            )
+
             AppSection.SETTINGS -> SettingsScreen(
               settings = settings,
               memoryProfile = viewModel.memoryProfile,
@@ -395,6 +453,11 @@ fun ChessHubAppRoot(
   if (showMoreSheet) {
     ModalBottomSheet(onDismissRequest = { showMoreSheet = false }) {
       Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        MoreSheetItem(Icons.Filled.Analytics, stringResource(R.string.nav_analysis)) {
+          analysisInitialTab = 0
+          showMoreSheet = false
+          viewModel.navigateTo(AppSection.ANALYSIS)
+        }
         MoreSheetItem(Icons.Filled.Public, stringResource(R.string.nav_online)) {
           showMoreSheet = false
           viewModel.navigateTo(AppSection.ONLINE)

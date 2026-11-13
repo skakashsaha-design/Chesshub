@@ -29,11 +29,40 @@ object PieceVectorRenderer {
     val color = PieceCode.colorOf(pieceCode) ?: return
     val type = PieceCode.typeOf(pieceCode) ?: return
 
-    val fill = if (color == PieceColor.WHITE) Color(0xFFFDFBF7) else Color(0xFF1F242D)
-    val stroke = if (color == PieceColor.WHITE) Color(0xFF1F242D) else Color(0xFFE2E8F0)
-    val detail = if (color == PieceColor.WHITE) Color(0xFF334155) else Color(0xFFCBD5E1)
-    val strokeW = (squareSize * if (style == PieceStyleOption.MODERN) 0.036f else 0.044f)
-      .coerceAtLeast(1.2f)
+    val fill = when (style) {
+      PieceStyleOption.ROYAL_GOLD ->
+        if (color == PieceColor.WHITE) Color(0xFFFFF8E7) else Color(0xFF1A1E29)
+      PieceStyleOption.HIGH_CONTRAST ->
+        if (color == PieceColor.WHITE) Color(0xFFFFFFFF) else Color(0xFF0B0E14)
+      PieceStyleOption.OUTLINE ->
+        if (color == PieceColor.WHITE) Color(0x55FFFFFF) else Color(0x88111827)
+      else ->
+        if (color == PieceColor.WHITE) Color(0xFFFDFBF7) else Color(0xFF1F242D)
+    }
+    val stroke = when (style) {
+      PieceStyleOption.ROYAL_GOLD ->
+        if (color == PieceColor.WHITE) Color(0xFF9A6B16) else Color(0xFFE9C46A)
+      PieceStyleOption.HIGH_CONTRAST ->
+        if (color == PieceColor.WHITE) Color(0xFF000000) else Color(0xFFF8FAFC)
+      PieceStyleOption.OUTLINE ->
+        if (color == PieceColor.WHITE) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+      else ->
+        if (color == PieceColor.WHITE) Color(0xFF1F242D) else Color(0xFFE2E8F0)
+    }
+    val detail = when (style) {
+      PieceStyleOption.ROYAL_GOLD ->
+        if (color == PieceColor.WHITE) Color(0xFFB48124) else Color(0xFFF6D98B)
+      PieceStyleOption.HIGH_CONTRAST ->
+        if (color == PieceColor.WHITE) Color(0xFF0F172A) else Color(0xFFFFFFFF)
+      else ->
+        if (color == PieceColor.WHITE) Color(0xFF334155) else Color(0xFFCBD5E1)
+    }
+    val strokeFactor = when (style) {
+      PieceStyleOption.MODERN -> 0.036f
+      PieceStyleOption.HIGH_CONTRAST, PieceStyleOption.OUTLINE -> 0.062f
+      else -> 0.044f
+    }
+    val strokeW = (squareSize * strokeFactor).coerceAtLeast(1.2f)
 
     if (style == PieceStyleOption.MINIMAL) {
       drawMinimalPiece(type, color, topLeft, squareSize, fill, stroke, detail, strokeW)
@@ -44,14 +73,17 @@ object PieceVectorRenderer {
     val s = squareSize - pad * 2f
     val ox = topLeft.x + pad
     val oy = topLeft.y + pad
+    val showDetails = style == PieceStyleOption.CLASSIC ||
+      style == PieceStyleOption.ROYAL_GOLD ||
+      style == PieceStyleOption.HIGH_CONTRAST
 
     when (type) {
-      PieceType.PAWN -> drawPawn(ox, oy, s, fill, stroke, strokeW, style == PieceStyleOption.CLASSIC)
-      PieceType.ROOK -> drawRook(ox, oy, s, fill, stroke, detail, strokeW, style == PieceStyleOption.CLASSIC)
-      PieceType.KNIGHT -> drawKnight(ox, oy, s, fill, stroke, detail, strokeW, style == PieceStyleOption.CLASSIC)
-      PieceType.BISHOP -> drawBishop(ox, oy, s, fill, stroke, detail, strokeW, style == PieceStyleOption.CLASSIC)
-      PieceType.QUEEN -> drawQueen(ox, oy, s, fill, stroke, detail, strokeW, style == PieceStyleOption.CLASSIC)
-      PieceType.KING -> drawKing(ox, oy, s, fill, stroke, detail, strokeW, style == PieceStyleOption.CLASSIC)
+      PieceType.PAWN -> drawPawn(ox, oy, s, fill, stroke, strokeW, showDetails)
+      PieceType.ROOK -> drawRook(ox, oy, s, fill, stroke, detail, strokeW, showDetails)
+      PieceType.KNIGHT -> drawKnight(ox, oy, s, fill, stroke, detail, strokeW, showDetails)
+      PieceType.BISHOP -> drawBishop(ox, oy, s, fill, stroke, detail, strokeW, showDetails)
+      PieceType.QUEEN -> drawQueen(ox, oy, s, fill, stroke, detail, strokeW, showDetails)
+      PieceType.KING -> drawKing(ox, oy, s, fill, stroke, detail, strokeW, showDetails)
     }
   }
 

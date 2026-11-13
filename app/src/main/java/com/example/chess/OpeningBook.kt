@@ -6,6 +6,12 @@ data class OpeningInfo(
   val movesLine: String,
 )
 
+data class OpeningContinuation(
+  val nextSan: String,
+  val eco: String,
+  val openingName: String,
+)
+
 /**
  * Compact curated ECO opening recognizer (< 5 KB in RAM).
  * Matches longest prefix of SAN moves cleanly.
@@ -108,5 +114,48 @@ object OpeningBook {
       moveNum++
     }
     return sb.toString()
+  }
+
+  /**
+   * Returns known opening theory continuations for the given prefix of SAN moves.
+   * Used by Opening Explorer / Position Explorer and Book move detection.
+   */
+  fun exploreContinuations(sanMoves: List<String>): List<OpeningContinuation> {
+    val cleanMoves = sanMoves.map { it.trimEnd('+', '#') }
+    val seenMoves = HashSet<String>()
+    val out = ArrayList<OpeningContinuation>()
+    for (entry in entries) {
+      if (entry.tokens.size > cleanMoves.size) {
+        var prefixMatches = true
+        for (i in cleanMoves.indices) {
+          if (entry.tokens[i] != cleanMoves[i]) {
+            prefixMatches = false
+            break
+          }
+        }
+        if (prefixMatches) {
+          val nextToken = entry.tokens[cleanMoves.size]
+          if (seenMoves.add(nextToken)) {
+            out.add(
+              OpeningContinuation(
+                nextSan = nextToken,
+                eco = entry.eco,
+                openingName = entry.name,
+              )
+            )
+          }
+        }
+      }
+    }
+    return out
+  }
+
+  fun isKnownBookPrefix(sanMoves: List<String>): Boolean {
+    if (sanMoves.isEmpty()) return false
+    val cleanMoves = sanMoves.map { it.trimEnd('+', '#') }
+    return entries.any { entry ->
+      entry.tokens.size >= cleanMoves.size &&
+        cleanMoves.indices.all { i -> entry.tokens[i] == cleanMoves[i] }
+    }
   }
 }
