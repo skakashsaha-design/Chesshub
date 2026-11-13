@@ -106,6 +106,120 @@ object ChessRules {
     )
   }
 
+  /**
+   * Generates a legal Chess960 (Fischer Random) starting position:
+   * - Bishops on opposite square colors
+   * - King strictly between the two rooks
+   * - Mirrored Black back rank
+   */
+  fun chess960BoardState(seedIndex: Int = kotlin.random.Random.nextInt(960)): BoardState {
+    val sp = ((seedIndex % 960) + 960) % 960
+    val back = arrayOfNulls<PieceType>(8)
+
+    // 1. Light-squared bishop (files 1,3,5,7 -> indices 0..3)
+    val n1 = sp / 4
+    val b1 = (sp % 4) * 2 + 1
+    back[b1] = PieceType.BISHOP
+
+    // 2. Dark-squared bishop (files 0,2,4,6 -> indices 0..3)
+    val n2 = n1 / 4
+    val b2 = (n1 % 4) * 2
+    back[b2] = PieceType.BISHOP
+
+    // 3. Queen among 6 remaining empty squares
+    val n3 = n2 / 6
+    var qCount = n2 % 6
+    for (f in 0..7) {
+      if (back[f] == null) {
+        if (qCount == 0) {
+          back[f] = PieceType.QUEEN
+          break
+        }
+        qCount--
+      }
+    }
+
+    // 4. Two knights among 5 remaining empty squares (10 combinations)
+    val knightPairs = arrayOf(
+      0 to 1, 0 to 2, 0 to 3, 0 to 4,
+      1 to 2, 1 to 3, 1 to 4,
+      2 to 3, 2 to 4, 3 to 4,
+    )
+    val (kA, kB) = knightPairs[n3 % 10]
+    var emptyIdx = 0
+    for (f in 0..7) {
+      if (back[f] == null) {
+        if (emptyIdx == kA || emptyIdx == kB) back[f] = PieceType.KNIGHT
+        emptyIdx++
+      }
+    }
+
+    // 5. Remaining 3 squares must be Rook - King - Rook
+    val krOrder = arrayOf(PieceType.ROOK, PieceType.KING, PieceType.ROOK)
+    var krIdx = 0
+    for (f in 0..7) {
+      if (back[f] == null) {
+        back[f] = krOrder[krIdx++]
+      }
+    }
+
+    val b = IntArray(64)
+    for (f in 0..7) {
+      val pt = back[f] ?: PieceType.PAWN
+      b[SquareUtil.of(f, 0)] = PieceCode.make(PieceColor.WHITE, pt)
+      b[SquareUtil.of(f, 1)] = PieceCode.WP
+      b[SquareUtil.of(f, 6)] = PieceCode.BP
+      b[SquareUtil.of(f, 7)] = PieceCode.make(PieceColor.BLACK, pt)
+    }
+
+    // Only enable standard castling flags if king & rooks happened to land on standard e/a/h files
+    var castling = 0
+    if (b[SquareUtil.of(4, 0)] == PieceCode.WK) {
+      if (b[SquareUtil.of(7, 0)] == PieceCode.WR) castling = castling or CastlingMask.WHITE_KING
+      if (b[SquareUtil.of(0, 0)] == PieceCode.WR) castling = castling or CastlingMask.WHITE_QUEEN
+    }
+    if (b[SquareUtil.of(4, 7)] == PieceCode.BK) {
+      if (b[SquareUtil.of(7, 7)] == PieceCode.BR) castling = castling or CastlingMask.BLACK_KING
+      if (b[SquareUtil.of(0, 7)] == PieceCode.BR) castling = castling or CastlingMask.BLACK_QUEEN
+    }
+
+    val hash = computeHash(b, PieceColor.WHITE, castling, -1)
+    return BoardState(
+      board = b,
+      turn = PieceColor.WHITE,
+      castlingMask = castling,
+      enPassantSq = -1,
+      halfMoveClock = 0,
+      fullMoveNumber = 1,
+      zobristHash = hash,
+    )
+  }
+
+  /**
+   * Builds a custom odds/handicap position removing a piece (Queen, Rook, Knight, or f-Pawn)
+   * from White or Black, cleanly adjusting castling rights when rooks are removed.
+   */
+  fun handicapBoardState(oddsPiece: PieceType, removeFromWhite: Boolean): BoardState {
+    val base = initialBoardState()
+    val b = base.board.copyOf()
+    val rank = if (removeFromWhite) 0 else 7
+    val pawnRank = if (removeFromWhite) 1 else 6
+    var castling = base.castlingMask
+    when (oddsPiece) {
+      PieceType.QUEEN -> b[SquareUtil.of(3, rank)] = PieceCode.EMPTY
+      PieceType.ROOK -> {
+        b[SquareUtil.of(0, rank)] = PieceCode.EMPTY
+        castling = castling and (if (removeFromWhite) CastlingMask.WHITE_QUEEN else CastlingMask.BLACK_QUEEN).inv()
+      }
+      PieceType.KNIGHT -> b[SquareUtil.of(1, rank)] = PieceCode.EMPTY
+      PieceType.BISHOP -> b[SquareUtil.of(2, rank)] = PieceCode.EMPTY
+      PieceType.PAWN -> b[SquareUtil.of(5, pawnRank)] = PieceCode.EMPTY
+      PieceType.KING -> Unit
+    }
+    val hash = computeHash(b, PieceColor.WHITE, castling, -1)
+    return base.copy(board = b, castlingMask = castling, zobristHash = hash)
+  }
+
   fun findKingSquare(board: IntArray, color: PieceColor): Int {
     val target = if (color == PieceColor.WHITE) PieceCode.WK else PieceCode.BK
     for (sq in 0 until 64) {

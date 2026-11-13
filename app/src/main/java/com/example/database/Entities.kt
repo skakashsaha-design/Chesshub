@@ -99,6 +99,10 @@ data class AppSettingsEntity(
   val enableCriticalMoments: Boolean = true,
   val showOpeningInfo: Boolean = true,
   val enableEngineAnalysis: Boolean = true,
+  // Achievements & Practice Progress
+  val unlockedBadgesCsv: String = "",
+  val bookDrillsCompleted: Int = 0,
+  val gameReviewsCompleted: Int = 0,
 )
 
 @Entity(tableName = "cached_profiles")

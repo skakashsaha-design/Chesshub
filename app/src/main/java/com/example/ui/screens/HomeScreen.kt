@@ -3,6 +3,8 @@ package com.example.ui.screens
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,11 +20,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -52,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import com.example.AppSection
 import com.example.PlatformProfileUiState
 import com.example.R
+import com.example.badges.EvaluatedBadge
 import com.example.database.AppSettingsEntity
 import com.example.database.GameEntity
 import com.example.database.GameSummaryRow
@@ -59,6 +67,7 @@ import com.example.music.MusicPlayerUiState
 import java.text.DateFormat
 import java.util.Date
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HomeScreen(
   settings: AppSettingsEntity,
@@ -67,12 +76,18 @@ fun HomeScreen(
   lichessProfile: PlatformProfileUiState,
   chessComProfile: PlatformProfileUiState,
   musicState: MusicPlayerUiState,
+  evaluatedBadges: List<EvaluatedBadge> = emptyList(),
   onQuickPlay: () -> Unit,
   onStartLocalTwoPlayer: () -> Unit,
   onContinueGame: (GameEntity) -> Unit,
   onReplayGame: (Long) -> Unit,
   onNavigate: (AppSection) -> Unit,
   onToggleMusic: () -> Unit,
+  onOpenBookPractice: () -> Unit = { onNavigate(AppSection.ANALYSIS) },
+  onOpenWatchLive: () -> Unit = { onNavigate(AppSection.ONLINE) },
+  onOpenNews: () -> Unit = { onNavigate(AppSection.ONLINE) },
+  onOpenTournaments: () -> Unit = { onNavigate(AppSection.BOTS) },
+  onOpenBadges: () -> Unit = { onNavigate(AppSection.PROFILES) },
 ) {
   LazyColumn(
     modifier = Modifier
@@ -115,15 +130,33 @@ fun HomeScreen(
           }
         }
 
-        if (settings.lowMemoryMode) {
+        val unlockedCount = evaluatedBadges.count { it.unlocked }
+        if (settings.lowMemoryMode || evaluatedBadges.isNotEmpty()) {
           Spacer(modifier = Modifier.height(6.dp))
-          AssistChip(
-            onClick = { onNavigate(AppSection.SETTINGS) },
-            label = { Text(stringResource(R.string.home_low_memory_badge)) },
-            leadingIcon = {
-              Icon(Icons.Filled.Memory, contentDescription = null, modifier = Modifier.size(16.dp))
-            },
-          )
+          FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            if (evaluatedBadges.isNotEmpty()) {
+              AssistChip(
+                onClick = onOpenBadges,
+                label = { Text("$unlockedCount / ${evaluatedBadges.size} Badges") },
+                leadingIcon = {
+                  Icon(Icons.Filled.MilitaryTech, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+                modifier = Modifier.testTag("home_badges_chip"),
+              )
+            }
+            if (settings.lowMemoryMode) {
+              AssistChip(
+                onClick = { onNavigate(AppSection.SETTINGS) },
+                label = { Text(stringResource(R.string.home_low_memory_badge)) },
+                leadingIcon = {
+                  Icon(Icons.Filled.Memory, contentDescription = null, modifier = Modifier.size(16.dp))
+                },
+              )
+            }
+          }
         }
       }
     }
@@ -237,12 +270,59 @@ fun HomeScreen(
           )
         }
 
-        HomeActionTile(
-          title = stringResource(R.string.home_analysis_lab),
-          icon = Icons.Filled.Analytics,
-          onClick = { onNavigate(AppSection.ANALYSIS) },
-          modifier = Modifier.fillMaxWidth().testTag("home_analysis_btn"),
-        )
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          HomeActionTile(
+            title = stringResource(R.string.home_analysis_lab),
+            icon = Icons.Filled.Analytics,
+            onClick = { onNavigate(AppSection.ANALYSIS) },
+            modifier = Modifier.weight(1f).testTag("home_analysis_btn"),
+          )
+          HomeActionTile(
+            title = "Book & Gambits",
+            icon = Icons.Filled.MenuBook,
+            onClick = onOpenBookPractice,
+            modifier = Modifier.weight(1f).testTag("home_book_practice_btn"),
+          )
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          HomeActionTile(
+            title = "Watch Live TV",
+            icon = Icons.Filled.LiveTv,
+            onClick = onOpenWatchLive,
+            modifier = Modifier.weight(1f).testTag("home_watch_live_btn"),
+          )
+          HomeActionTile(
+            title = "Tournaments",
+            icon = Icons.Filled.EmojiEvents,
+            onClick = onOpenTournaments,
+            modifier = Modifier.weight(1f).testTag("home_tournaments_btn"),
+          )
+        }
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          HomeActionTile(
+            title = "Chess News",
+            icon = Icons.Filled.Newspaper,
+            onClick = onOpenNews,
+            modifier = Modifier.weight(1f).testTag("home_news_btn"),
+          )
+          HomeActionTile(
+            title = "Badges & Scout",
+            icon = Icons.Filled.MilitaryTech,
+            onClick = onOpenBadges,
+            modifier = Modifier.weight(1f).testTag("home_badges_scout_btn"),
+          )
+        }
       }
     }
 

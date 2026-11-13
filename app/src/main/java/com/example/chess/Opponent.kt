@@ -31,6 +31,11 @@ data class BotProfile(
   val emblemColorHex: Long,
   val iconType: String,
   val playingStyle: BotPlayingStyle = BotPlayingStyle.BALANCED,
+  val secondaryColorHex: Long = 0xFF1E293B,
+  val nationality: String = "Global",
+  val favoriteOpening: String = "Italian Game (C50)",
+  val catchphrase: String = "Every move tells a story.",
+  val bio: String = "Club-calibrated engine sparring partner built for fair progression.",
 )
 
 /**

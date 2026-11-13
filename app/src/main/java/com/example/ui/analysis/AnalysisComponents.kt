@@ -48,7 +48,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.analysis.AnalysisPolicy
+import com.example.analysis.GameReviewSummary
 import com.example.analysis.MoveAnalysisEntry
+import com.example.analysis.MoveClassification
 import com.example.analysis.PositionAnalysisSnapshot
 import com.example.chess.Move
 import com.example.database.AppSettingsEntity
@@ -419,12 +421,36 @@ fun OpeningExplorerCard(
 
   Card(modifier = modifier.fillMaxWidth()) {
     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(Icons.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.weight(1f)) {
+          Icon(Icons.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+          Text(
+            text = info?.let { "${it.eco} • ${it.name}" } ?: "Opening Explorer",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+          )
+        }
+        if (info?.isGambit == true) {
+          Surface(color = Color(0xFFEF4444).copy(alpha = 0.16f), shape = RoundedCornerShape(6.dp)) {
+            Text(
+              text = "GAMBIT",
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Bold,
+              color = Color(0xFFEF4444),
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+          }
+        }
+      }
+      if (info != null && info.planSummary.isNotBlank()) {
         Text(
-          text = info?.let { "${it.eco} • ${it.name}" } ?: "Opening Explorer",
-          style = MaterialTheme.typography.labelLarge,
-          fontWeight = FontWeight.Bold,
+          text = info.planSummary,
+          style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
       }
       if (conts.isNotEmpty()) {
@@ -445,5 +471,121 @@ fun OpeningExplorerCard(
         )
       }
     }
+  }
+}
+
+@Composable
+fun PlayerVsOpponentComparisonCard(
+  review: GameReviewSummary,
+  whiteLabel: String = "White",
+  blackLabel: String = "Black",
+  modifier: Modifier = Modifier,
+) {
+  if (review.moveEntries.isEmpty()) return
+  val rows = listOf(
+    Triple(MoveClassification.BRILLIANT, review.whiteCounts.brilliant, review.blackCounts.brilliant),
+    Triple(MoveClassification.BEST, review.whiteCounts.best, review.blackCounts.best),
+    Triple(MoveClassification.EXCELLENT, review.whiteCounts.excellent, review.blackCounts.excellent),
+    Triple(MoveClassification.GOOD, review.whiteCounts.good, review.blackCounts.good),
+    Triple(MoveClassification.BOOK, review.whiteCounts.book, review.blackCounts.book),
+    Triple(MoveClassification.INACCURACY, review.whiteCounts.inaccuracy, review.blackCounts.inaccuracy),
+    Triple(MoveClassification.MISTAKE, review.whiteCounts.mistake, review.blackCounts.mistake),
+    Triple(MoveClassification.MISSED_OPPORTUNITY, review.whiteCounts.missedOpportunity, review.blackCounts.missedOpportunity),
+    Triple(MoveClassification.BLUNDER, review.whiteCounts.blunder, review.blackCounts.blunder),
+  )
+
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .testTag("player_vs_opponent_comparison_card"),
+  ) {
+    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+      Text(
+        text = "Player vs Opponent Comparison",
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.Bold,
+      )
+      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(whiteLabel, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text("Category", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+          text = blackLabel,
+          style = MaterialTheme.typography.labelMedium,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier.weight(1f),
+          textAlign = androidx.compose.ui.text.style.TextAlign.End,
+        )
+      }
+
+      rows.forEach { (cls, wVal, bVal) ->
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text(
+            text = wVal.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = if (wVal > 0) Color(cls.badgeColorHex) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(40.dp),
+          )
+          Surface(
+            color = Color(cls.badgeColorHex).copy(alpha = 0.14f),
+            shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.weight(1f),
+          ) {
+            Text(
+              text = "${cls.symbol} ${cls.label}",
+              style = MaterialTheme.typography.labelMedium,
+              fontWeight = FontWeight.SemiBold,
+              color = Color(cls.badgeColorHex),
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+          }
+          Text(
+            text = bVal.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = if (bVal > 0) Color(cls.badgeColorHex) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(40.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+          )
+        }
+      }
+
+      Spacer(modifier = Modifier.height(4.dp))
+      ComparisonMetricRow("Avg CP Loss (ACPL)", "${review.whiteCounts.averageCpLoss}", "${review.blackCounts.averageCpLoss}")
+      ComparisonMetricRow(
+        "Opening Accuracy",
+        review.whiteOpeningAcc?.let { "%.1f%%".format(it) } ?: "—",
+        review.blackOpeningAcc?.let { "%.1f%%".format(it) } ?: "—",
+      )
+      ComparisonMetricRow(
+        "Middlegame Accuracy",
+        review.whiteMiddlegameAcc?.let { "%.1f%%".format(it) } ?: "—",
+        review.blackMiddlegameAcc?.let { "%.1f%%".format(it) } ?: "—",
+      )
+      ComparisonMetricRow(
+        "Endgame Accuracy",
+        review.whiteEndgameAcc?.let { "%.1f%%".format(it) } ?: "—",
+        review.blackEndgameAcc?.let { "%.1f%%".format(it) } ?: "—",
+      )
+    }
+  }
+}
+
+@Composable
+private fun ComparisonMetricRow(label: String, whiteVal: String, blackVal: String) {
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Text(whiteVal, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(blackVal, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
   }
 }

@@ -64,9 +64,11 @@ import com.example.analysis.AnalysisSessionState
 import com.example.analysis.MoveClassification
 import com.example.analysis.MoveFeedbackAnalyzer
 import com.example.analysis.TrainerDrill
+import com.example.chess.BookRepertoire
 import com.example.chess.BotProfile
 import com.example.chess.ChessNotation
 import com.example.chess.Move
+import com.example.chess.OpeningBook
 import com.example.database.AppSettingsEntity
 import com.example.ui.analysis.BoardEditorTab
 import com.example.ui.analysis.EnginePvAndCandidatesCard
@@ -74,6 +76,7 @@ import com.example.ui.analysis.EvaluationBarStrip
 import com.example.ui.analysis.EvaluationGraphCard
 import com.example.ui.analysis.MoveFeedbackBanner
 import com.example.ui.analysis.OpeningExplorerCard
+import com.example.ui.analysis.PlayerVsOpponentComparisonCard
 import com.example.ui.analysis.TacticalAndEndgameCard
 import com.example.ui.analysis.buildBoardArrows
 import com.example.ui.board.BoardThemeOption
@@ -98,6 +101,8 @@ fun AnalysisSuiteScreen(
   onLoadFenToAnalysis: (String) -> Boolean,
   onPlayFenVsBot: (String, BotProfile?) -> Boolean,
   onMessage: (String) -> Unit,
+  onStartBookPractice: (BookRepertoire) -> Unit = {},
+  onSetDepthMode: (String) -> Unit = {},
 ) {
   var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
 
@@ -128,6 +133,7 @@ fun AnalysisSuiteScreen(
         onPlaySuggestedMove = onPlaySuggestedMove,
         onPlayBookMove = onPlayBookMove,
         onLoadFenToAnalysis = onLoadFenToAnalysis,
+        onSetDepthMode = onSetDepthMode,
         onMessage = onMessage,
       )
       1 -> GameReviewTab(
@@ -139,6 +145,7 @@ fun AnalysisSuiteScreen(
         },
         onRunGameReview = onRunGameReview,
         onCancelGameReview = onCancelGameReview,
+        onSetDepthMode = onSetDepthMode,
       )
       2 -> TrainerAndPracticeTab(
         session = session,
@@ -146,6 +153,7 @@ fun AnalysisSuiteScreen(
         onSquareTap = onSquareTap,
         onUndoMove = onUndoMove,
         onLoadDrill = onLoadDrill,
+        onStartBookPractice = onStartBookPractice,
         onTogglePracticeMode = onTogglePracticeMode,
         onPlaySuggestedMove = onPlaySuggestedMove,
       )
@@ -175,6 +183,7 @@ private fun LiveAnalyzeTab(
   onPlaySuggestedMove: (Move) -> Unit,
   onPlayBookMove: (String) -> Unit,
   onLoadFenToAnalysis: (String) -> Boolean,
+  onSetDepthMode: (String) -> Unit,
   onMessage: (String) -> Unit,
 ) {
   val context = LocalContext.current
@@ -241,6 +250,25 @@ private fun LiveAnalyzeTab(
         }
         OutlinedButton(onClick = { showFenDialog = true }) {
           Text("FEN")
+        }
+      }
+    }
+
+    if (settings.enableEngineAnalysis) {
+      item {
+        Row(
+          modifier = Modifier.fillMaxWidth().widthIn(max = 580.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Depth:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+          listOf("Fast", "Balanced", "Deep").forEach { mode ->
+            FilterChip(
+              selected = session.analysisDepthMode == mode,
+              onClick = { onSetDepthMode(mode) },
+              label = { Text(mode) },
+            )
+          }
         }
       }
     }
@@ -353,6 +381,7 @@ private fun GameReviewTab(
   onStepPly: (Int) -> Unit,
   onRunGameReview: () -> Unit,
   onCancelGameReview: () -> Unit,
+  onSetDepthMode: (String) -> Unit,
 ) {
   val review = session.reviewSummary
 
@@ -367,7 +396,20 @@ private fun GameReviewTab(
     item {
       Card(modifier = Modifier.fillMaxWidth().widthIn(max = 580.dp)) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text("Game Review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+          Text("Advanced Game Review", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+          ) {
+            Text("Precision:", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            listOf("Fast", "Balanced", "Deep").forEach { mode ->
+              FilterChip(
+                selected = session.analysisDepthMode == mode,
+                onClick = { onSetDepthMode(mode) },
+                label = { Text(mode) },
+              )
+            }
+          }
           if (!settings.enableGameAnalysis) {
             Text(
               text = "Game Analysis is currently OFF in Settings. Turn it ON to analyze full games.",
@@ -386,7 +428,7 @@ private fun GameReviewTab(
             ) {
               Icon(Icons.Filled.PlayArrow, contentDescription = null)
               Spacer(modifier = Modifier.width(6.dp))
-              Text(if (review.moveEntries.isEmpty()) "Run Game Review (${session.historyMoves.size} plies)" else "Re-run Game Review")
+              Text(if (review.moveEntries.isEmpty()) "Run Game Review (${session.historyMoves.size} plies)" else "Re-run Game Review (${session.analysisDepthMode})")
             }
           }
         }
@@ -401,6 +443,31 @@ private fun GameReviewTab(
         ) {
           AccuracyCard("White Accuracy", review.whiteAccuracyPercent, Modifier.weight(1f))
           AccuracyCard("Black Accuracy", review.blackAccuracyPercent, Modifier.weight(1f))
+        }
+      }
+
+      if (settings.showMoveFeedback) {
+        item {
+          PlayerVsOpponentComparisonCard(
+            review = review,
+            modifier = Modifier.widthIn(max = 580.dp),
+          )
+        }
+      }
+
+      val nextMistakeEntry = review.moveEntries.firstOrNull {
+        it.plyIndex > session.currentPly && it.classification.isMistakeOrWorse
+      } ?: review.moveEntries.firstOrNull { it.classification.isMistakeOrWorse }
+      if (nextMistakeEntry != null) {
+        item {
+          OutlinedButton(
+            onClick = { onStepPly(nextMistakeEntry.plyIndex) },
+            modifier = Modifier.fillMaxWidth().widthIn(max = 580.dp),
+          ) {
+            Text(
+              "Inspect Mistake: ${(nextMistakeEntry.plyIndex + 1) / 2}${if (nextMistakeEntry.plyIndex % 2 == 1) "." else "..."}${nextMistakeEntry.san} (${nextMistakeEntry.classification.label})"
+            )
+          }
         }
       }
 
@@ -497,6 +564,7 @@ private fun AccuracyCard(title: String, accuracyPercent: Double, modifier: Modif
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TrainerAndPracticeTab(
   session: AnalysisSessionState,
@@ -504,10 +572,17 @@ private fun TrainerAndPracticeTab(
   onSquareTap: (Int) -> Unit,
   onUndoMove: () -> Unit,
   onLoadDrill: (TrainerDrill) -> Unit,
+  onStartBookPractice: (BookRepertoire) -> Unit,
   onTogglePracticeMode: (Boolean) -> Unit,
   onPlaySuggestedMove: (Move) -> Unit,
 ) {
   val arrows = remember(session.snapshot, settings) { buildBoardArrows(session.snapshot, settings) }
+  val allRepertoires = remember { OpeningBook.allRepertoires() }
+  var bookCategory by remember { mutableStateOf("All") }
+  val filteredBooks = remember(bookCategory) {
+    if (bookCategory == "All") allRepertoires
+    else allRepertoires.filter { it.category == bookCategory }
+  }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize().testTag("trainer_practice_tab"),
@@ -523,18 +598,34 @@ private fun TrainerAndPracticeTab(
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Filled.School, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            Text("Chess Trainer & Practice Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(
+              text = session.bookPractice?.let { "Book Practice: ${it.repertoire.name}" }
+                ?: "Chess Trainer, Books & Practice",
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+            )
           }
           Text(
-            text = session.practiceCoachPrompt ?: "Choose a drill below or activate Practice Mode to play moves with instant coach feedback.",
+            text = session.practiceCoachPrompt ?: "Choose an opening/gambit line or tactical drill below, or activate Practice Mode.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onPrimaryContainer,
           )
+          session.bookPractice?.let { bp ->
+            LinearProgressIndicator(
+              progress = { (bp.stepIndex.toFloat() / bp.repertoire.movesTokens.size.coerceAtLeast(1)).coerceIn(0f, 1f) },
+              modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+              text = "${bp.repertoire.eco} • Moves: ${bp.stepIndex}/${bp.repertoire.movesTokens.size} • Mistakes: ${bp.mistakesCount}",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+          }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
               selected = session.practiceActive,
               onClick = { onTogglePracticeMode(!session.practiceActive) },
-              label = { Text(if (session.practiceActive) "Practice: ON" else "Start Practice Here") },
+              label = { Text(if (session.practiceActive) "Practice: ON" else "Free Practice") },
             )
             OutlinedButton(onClick = onUndoMove, enabled = session.currentPly > 0) {
               Text("Retry / Undo")
@@ -594,6 +685,74 @@ private fun TrainerAndPracticeTab(
         onPlayMove = onPlaySuggestedMove,
         modifier = Modifier.widthIn(max = 580.dp),
       )
+    }
+
+    // All Book & Gambit Move Practice Section
+    item {
+      Column(
+        modifier = Modifier.fillMaxWidth().widthIn(max = 580.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        Text(
+          text = "All Book & Gambit Move Practice (${filteredBooks.size})",
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+        )
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          listOf("All", "Gambits", "1.e4", "1.d4", "Flank").forEach { cat ->
+            FilterChip(
+              selected = bookCategory == cat,
+              onClick = { bookCategory = cat },
+              label = { Text(cat) },
+            )
+          }
+        }
+      }
+    }
+
+    items(filteredBooks, key = { "book_${it.id}" }) { rep ->
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .widthIn(max = 580.dp)
+          .clickable { onStartBookPractice(rep) },
+      ) {
+        Row(
+          modifier = Modifier.padding(12.dp),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Text("${rep.eco} • ${rep.name}", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+              if (rep.isGambit) {
+                Surface(color = Color(0xFFEF4444).copy(alpha = 0.15f), shape = MaterialTheme.shapes.small) {
+                  Text(
+                    text = "Gambit",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFEF4444),
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                  )
+                }
+              }
+            }
+            Text(
+              text = "${rep.movesLine} (As ${rep.practiceAs.name.lowercase()})",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+              text = rep.planSummary,
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+          }
+          OutlinedButton(onClick = { onStartBookPractice(rep) }) {
+            Text("Practice")
+          }
+        }
+      }
     }
 
     item {

@@ -1,11 +1,12 @@
 package com.example.bots
 
 import com.example.chess.BotProfile
-import com.example.chess.ChessNotation
 import com.example.chess.ChessRules
 import com.example.chess.GameResult
 import com.example.engine.ChessEngine
 import com.example.engine.DeviceMemoryAdvisor
+import com.example.offline.TimeCategory
+import com.example.offline.TimeControl
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -25,6 +26,7 @@ data class TournamentMatchSummary(
   val blackName: String,
   val result: GameResult,
   val movesCount: Int,
+  val timeCategoryLabel: String = "Rapid",
 )
 
 data class TournamentProgress(
@@ -32,15 +34,20 @@ data class TournamentProgress(
   val completedMatches: List<TournamentMatchSummary>,
   val isRunning: Boolean,
   val currentPairing: String,
+  val tournamentTitle: String = "4-Bot Round Robin",
+  val timeControl: TimeControl = TimeControl.presets[4],
 )
 
 /**
- * Runs compact offline Bot vs Bot round-robin tournaments safely off the UI thread.
+ * Runs compact offline Bot vs Bot tournaments across Bullet, Blitz, Rapid, and Classical
+ * budgets safely off the UI thread.
  */
 object BotTournamentEngine {
 
   suspend fun runRoundRobin(
     participants: List<BotProfile>,
+    timeControl: TimeControl = TimeControl.presets[4], // 5+0 Blitz default
+    tournamentTitle: String = "${timeControl.category.label} ${timeControl.label} Round Robin",
     lowMemoryMode: Boolean,
     isLowRamHardware: Boolean,
     onProgress: (TournamentProgress) -> Unit,
@@ -56,6 +63,17 @@ object BotTournamentEngine {
       }
     }
 
+    val perMoveBudgetCapMs = when (timeControl.category) {
+      TimeCategory.BULLET -> 90L
+      TimeCategory.BLITZ -> 180L
+      TimeCategory.RAPID -> 320L
+      TimeCategory.CLASSICAL, TimeCategory.UNLIMITED -> 420L
+    }
+    val depthCap = when (timeControl.category) {
+      TimeCategory.BULLET -> 2
+      else -> 3
+    }
+
     for ((whiteBot, blackBot) in pairings) {
       coroutineContext.ensureActive()
       onProgress(
@@ -64,6 +82,8 @@ object BotTournamentEngine {
           completedMatches = matches.toList(),
           isRunning = true,
           currentPairing = "${whiteBot.name} vs ${blackBot.name}",
+          tournamentTitle = tournamentTitle,
+          timeControl = timeControl,
         )
       )
 
@@ -77,13 +97,19 @@ object BotTournamentEngine {
         coroutineContext.ensureActive()
         val activeBot = if (state.turn.name == "WHITE") whiteBot else blackBot
         val budget = DeviceMemoryAdvisor.computeSearchBudget(
-          requestedDepth = activeBot.maxDepth.coerceAtMost(3),
-          requestedTimeMs = activeBot.maxThinkTimeMs.coerceAtMost(350L),
+          requestedDepth = activeBot.maxDepth.coerceAtMost(depthCap),
+          requestedTimeMs = activeBot.maxThinkTimeMs.coerceAtMost(perMoveBudgetCapMs),
           lowMemoryMode = lowMemoryMode,
           batterySavingMode = true,
           isLowRamHardware = isLowRamHardware,
         )
-        val search = engine.findBestMove(state, budget, activeBot.randomnessCp, reps) ?: break
+        val search = engine.findBestMove(
+          state = state,
+          budget = budget,
+          randomnessCp = activeBot.randomnessCp,
+          recentHashes = reps,
+          playingStyle = activeBot.playingStyle,
+        ) ?: break
         state = ChessRules.applyMove(state, search.bestMove)
         plies++
         val key = ChessRules.repetitionKey(state)
@@ -123,6 +149,7 @@ object BotTournamentEngine {
           blackName = blackBot.name,
           result = result,
           movesCount = (plies + 1) / 2,
+          timeCategoryLabel = "${timeControl.category.label} ${timeControl.label}",
         )
       )
     }
@@ -133,6 +160,8 @@ object BotTournamentEngine {
         completedMatches = matches,
         isRunning = false,
         currentPairing = "",
+        tournamentTitle = tournamentTitle,
+        timeControl = timeControl,
       )
     )
   }

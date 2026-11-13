@@ -71,6 +71,22 @@ data class ActiveGameUiState(
   val moveFeedbackHistory: List<MoveAnalysisEntry> = emptyList(),
   val lastMoveFeedback: MoveAnalysisEntry? = null,
   val customStartFen: String? = null,
+  val chessVariantLabel: String = "Standard",
+  val lastDialogueOpeningKey: String? = null,
+)
+
+data class PublicFeedUiState(
+  val tvChannels: List<com.example.lichess.TvChannelGame> = emptyList(),
+  val isLoadingTv: Boolean = false,
+  val tvError: String? = null,
+  val liveTournaments: List<com.example.lichess.LiveTournamentItem> = emptyList(),
+  val isLoadingTournaments: Boolean = false,
+  val tournamentsError: String? = null,
+  val newsItems: List<com.example.lichess.ChessNewsItem> = emptyList(),
+  val isLoadingNews: Boolean = false,
+  val newsError: String? = null,
+  val scoutPlatform: String = "LICHESS",
+  val scoutProfile: PlatformProfileUiState = PlatformProfileUiState(),
 )
 
 data class PuzzleAttemptRecord(

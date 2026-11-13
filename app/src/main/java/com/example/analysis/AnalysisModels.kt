@@ -85,10 +85,35 @@ data class PositionAnalysisSnapshot(
   val depthReached: Int = 0,
 )
 
+data class SideFeedbackCounts(
+  val totalMoves: Int = 0,
+  val brilliant: Int = 0,
+  val best: Int = 0,
+  val excellent: Int = 0,
+  val good: Int = 0,
+  val book: Int = 0,
+  val inaccuracy: Int = 0,
+  val mistake: Int = 0,
+  val missedOpportunity: Int = 0,
+  val blunder: Int = 0,
+  val averageCpLoss: Int = 0,
+) {
+  val accuracyAndSolidCount: Int get() = brilliant + best + excellent + good + book
+  val errorsCount: Int get() = inaccuracy + mistake + missedOpportunity + blunder
+}
+
 data class GameReviewSummary(
   val moveEntries: List<MoveAnalysisEntry> = emptyList(),
   val whiteAccuracyPercent: Double = 0.0,
   val blackAccuracyPercent: Double = 0.0,
+  val whiteCounts: SideFeedbackCounts = SideFeedbackCounts(),
+  val blackCounts: SideFeedbackCounts = SideFeedbackCounts(),
+  val whiteOpeningAcc: Double? = null,
+  val whiteMiddlegameAcc: Double? = null,
+  val whiteEndgameAcc: Double? = null,
+  val blackOpeningAcc: Double? = null,
+  val blackMiddlegameAcc: Double? = null,
+  val blackEndgameAcc: Double? = null,
   val evalSeriesForWhite: List<Int> = emptyList(),
   val criticalPlyIndices: List<Int> = emptyList(),
   val summaryNote: String = "",
@@ -103,6 +128,14 @@ data class TrainerDrill(
   val difficulty: String,
   val fen: String,
   val goal: String,
+)
+
+data class BookPracticeSession(
+  val repertoire: com.example.chess.BookRepertoire,
+  val stepIndex: Int = 0,
+  val completed: Boolean = false,
+  val mistakesCount: Int = 0,
+  val statusMessage: String = "",
 )
 
 data class AnalysisSessionState(
@@ -121,6 +154,8 @@ data class AnalysisSessionState(
   val practiceCoachPrompt: String? = null,
   val practiceRetryCount: Int = 0,
   val activeDrill: TrainerDrill? = null,
+  val bookPractice: BookPracticeSession? = null,
+  val analysisDepthMode: String = "Balanced", // Fast, Balanced, Deep
 )
 
 /**

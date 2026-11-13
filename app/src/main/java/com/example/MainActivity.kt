@@ -152,11 +152,16 @@ fun ChessHubAppRoot(
   val musicState by viewModel.musicController.state.collectAsStateWithLifecycle()
   val engineStatus by viewModel.engineStatus.collectAsStateWithLifecycle()
   val analysisSession by viewModel.analysisSession.collectAsStateWithLifecycle()
+  val evaluatedBadges by viewModel.evaluatedBadges.collectAsStateWithLifecycle()
+  val publicFeed by viewModel.publicFeed.collectAsStateWithLifecycle()
+  val onlineChatMessages by viewModel.onlineChatMessages.collectAsStateWithLifecycle()
   val snackbarMessage by viewModel.snackbarMessage.collectAsStateWithLifecycle()
 
   val snackbarHostState = remember { SnackbarHostState() }
   var showMoreSheet by remember { mutableStateOf(false) }
   var analysisInitialTab by remember { mutableIntStateOf(0) }
+  var onlineInitialTab by remember { mutableIntStateOf(0) }
+  var botsInitialTab by remember { mutableIntStateOf(0) }
 
   LaunchedEffect(snackbarMessage) {
     val msg = snackbarMessage ?: return@LaunchedEffect
@@ -194,7 +199,10 @@ fun ChessHubAppRoot(
             )
             NavigationBarItem(
               selected = currentSection == AppSection.BOTS,
-              onClick = { viewModel.navigateTo(AppSection.BOTS) },
+              onClick = {
+                botsInitialTab = 0
+                viewModel.navigateTo(AppSection.BOTS)
+              },
               icon = { Icon(Icons.Filled.SmartToy, contentDescription = null) },
               label = { Text(stringResource(R.string.nav_bots), maxLines = 1) },
               modifier = Modifier.testTag("nav_bots"),
@@ -232,12 +240,18 @@ fun ChessHubAppRoot(
           NavigationRail(modifier = Modifier.fillMaxHeight()) {
             SectionItem(AppSection.HOME, Icons.Filled.Home, stringResource(R.string.nav_home), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.PLAY, Icons.Filled.GridView, stringResource(R.string.nav_play), currentSection, viewModel::navigateTo)
-            SectionItem(AppSection.BOTS, Icons.Filled.SmartToy, stringResource(R.string.nav_bots), currentSection, viewModel::navigateTo)
+            SectionItem(AppSection.BOTS, Icons.Filled.SmartToy, stringResource(R.string.nav_bots), currentSection) {
+              botsInitialTab = 0
+              viewModel.navigateTo(it)
+            }
             SectionItem(AppSection.ANALYSIS, Icons.Filled.Analytics, stringResource(R.string.nav_analysis), currentSection) {
               analysisInitialTab = 0
               viewModel.navigateTo(it)
             }
-            SectionItem(AppSection.ONLINE, Icons.Filled.Public, stringResource(R.string.nav_online), currentSection, viewModel::navigateTo)
+            SectionItem(AppSection.ONLINE, Icons.Filled.Public, stringResource(R.string.nav_online), currentSection) {
+              onlineInitialTab = 0
+              viewModel.navigateTo(it)
+            }
             SectionItem(AppSection.PUZZLES, Icons.Filled.Extension, stringResource(R.string.nav_puzzles), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.PROFILES, Icons.Filled.Person, stringResource(R.string.nav_profiles), currentSection, viewModel::navigateTo)
             SectionItem(AppSection.MUSIC, Icons.Filled.MusicNote, stringResource(R.string.nav_music), currentSection, viewModel::navigateTo)
@@ -254,6 +268,7 @@ fun ChessHubAppRoot(
               lichessProfile = lichessProfile,
               chessComProfile = chessComProfile,
               musicState = musicState,
+              evaluatedBadges = evaluatedBadges,
               onQuickPlay = { viewModel.startQuickPlay() },
               onStartLocalTwoPlayer = {
                 viewModel.startNewGame(
@@ -267,9 +282,28 @@ fun ChessHubAppRoot(
               onReplayGame = { viewModel.loadGameForReplay(it) },
               onNavigate = { sec ->
                 if (sec == AppSection.ANALYSIS) analysisInitialTab = 0
+                if (sec == AppSection.ONLINE) onlineInitialTab = 0
+                if (sec == AppSection.BOTS) botsInitialTab = 0
                 viewModel.navigateTo(sec)
               },
               onToggleMusic = { viewModel.musicController.togglePlayPause() },
+              onOpenBookPractice = {
+                analysisInitialTab = 2
+                viewModel.navigateTo(AppSection.ANALYSIS)
+              },
+              onOpenWatchLive = {
+                onlineInitialTab = 1
+                viewModel.navigateTo(AppSection.ONLINE)
+              },
+              onOpenNews = {
+                onlineInitialTab = 3
+                viewModel.navigateTo(AppSection.ONLINE)
+              },
+              onOpenTournaments = {
+                botsInitialTab = 2
+                viewModel.navigateTo(AppSection.BOTS)
+              },
+              onOpenBadges = { viewModel.navigateTo(AppSection.PROFILES) },
             )
 
             AppSection.PLAY -> PlayScreen(
@@ -279,6 +313,7 @@ fun ChessHubAppRoot(
               historyGames = historyGames,
               historyQuery = historyQuery,
               historySort = historySort,
+              onlineChatMessages = onlineChatMessages,
               onSquareTap = viewModel::onSquareTapped,
               onPromotionSelected = viewModel::onPromotionSelected,
               onDismissPromotion = viewModel::dismissPromotion,
@@ -296,6 +331,20 @@ fun ChessHubAppRoot(
               onStartNewMatch = { mode, w, b, tc ->
                 viewModel.startNewGame(mode, w, b, tc, navigateToPlay = false)
               },
+              onStartCustomMatch = { mode, w, b, tc, variant, seed, handicapPiece, handicapFromWhite, customFen ->
+                viewModel.startCustomGame(
+                  mode = mode,
+                  white = w,
+                  black = b,
+                  timeControl = tc,
+                  variant = variant,
+                  chess960Seed = seed,
+                  handicapPiece = handicapPiece,
+                  handicapFromWhite = handicapFromWhite,
+                  customFen = customFen,
+                  navigateToPlay = false,
+                )
+              },
               onExportCurrentPgn = viewModel::exportCurrentGamePgn,
               onSharePgn = onSharePgn,
               onImportPgn = viewModel::importPgnToDatabase,
@@ -306,12 +355,16 @@ fun ChessHubAppRoot(
               onDeleteSavedGame = viewModel::deleteGame,
               onMessage = viewModel::postMessage,
               onDismissBotDialogue = viewModel::dismissBotDialogue,
-              onSwitchBot = { viewModel.navigateTo(AppSection.BOTS) },
+              onSwitchBot = {
+                botsInitialTab = 0
+                viewModel.navigateTo(AppSection.BOTS)
+              },
               onOpenAnalysis = { openReviewTab ->
                 analysisInitialTab = if (openReviewTab) 1 else 0
                 viewModel.openAnalysisForCurrentGame(autoRunReview = openReviewTab)
               },
               onImportFen = { fen -> viewModel.loadFenIntoPlay(fen) },
+              onSendOnlineChat = viewModel::sendOnlineChat,
             )
 
             AppSection.BOTS -> BotsScreen(
@@ -319,6 +372,7 @@ fun ChessHubAppRoot(
               tournamentProgress = tournamentProgress,
               engineStatus = engineStatus,
               settings = settings,
+              initialTab = botsInitialTab,
               onPlayVsBot = { bot, training ->
                 viewModel.startNewGame(
                   mode = if (training) GameMode.BOT_TRAINING else GameMode.HUMAN_VS_BOT,
@@ -350,6 +404,7 @@ fun ChessHubAppRoot(
               },
               onStartTournament = viewModel::startFourBotTournament,
               onCancelTournament = viewModel::cancelTournament,
+              onStartCustomTournament = viewModel::startBotTournament,
             )
 
             AppSection.ONLINE -> OnlineScreen(
@@ -359,6 +414,18 @@ fun ChessHubAppRoot(
               onConnect = viewModel::connectOnline,
               onDisconnect = { viewModel.onlineClient.disconnect() },
               onRequestMatch = viewModel::requestOnlineMatch,
+              publicFeed = publicFeed,
+              onlineChatMessages = onlineChatMessages,
+              onSendChat = viewModel::sendOnlineChat,
+              onRefreshTv = viewModel::refreshTvChannels,
+              onWatchPublicGame = viewModel::watchPublicGame,
+              onRefreshTournaments = viewModel::refreshLiveTournaments,
+              onRefreshNews = viewModel::refreshChessNews,
+              onOpenOfflineTournaments = {
+                botsInitialTab = 2
+                viewModel.navigateTo(AppSection.BOTS)
+              },
+              initialTab = onlineInitialTab,
             )
 
             AppSection.PUZZLES -> PuzzlesScreen(
@@ -370,6 +437,8 @@ fun ChessHubAppRoot(
               settings = settings,
               lichessProfile = lichessProfile,
               chessComProfile = chessComProfile,
+              evaluatedBadges = evaluatedBadges,
+              publicFeed = publicFeed,
               onUpdatePlayerName = { name ->
                 val clean = name.trim().take(24)
                 if (clean.isNotEmpty()) {
@@ -386,6 +455,7 @@ fun ChessHubAppRoot(
               onReplayPublicGame = { g ->
                 viewModel.loadPgnTextForReplay(g.pgn, g.white, g.black)
               },
+              onScoutPlayer = viewModel::scoutOtherPlayer,
             )
 
             AppSection.MUSIC -> MusicScreen(
@@ -430,6 +500,8 @@ fun ChessHubAppRoot(
               onLoadFenToAnalysis = { fen -> viewModel.loadFenIntoAnalysis(fen) },
               onPlayFenVsBot = { fen, bot -> viewModel.loadFenIntoPlay(fen, bot) },
               onMessage = viewModel::postMessage,
+              onStartBookPractice = viewModel::startBookPractice,
+              onSetDepthMode = viewModel::setAnalysisDepthMode,
             )
 
             AppSection.SETTINGS -> SettingsScreen(
@@ -459,6 +531,7 @@ fun ChessHubAppRoot(
           viewModel.navigateTo(AppSection.ANALYSIS)
         }
         MoreSheetItem(Icons.Filled.Public, stringResource(R.string.nav_online)) {
+          onlineInitialTab = 0
           showMoreSheet = false
           viewModel.navigateTo(AppSection.ONLINE)
         }

@@ -58,6 +58,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.example.R
 import com.example.bots.BotCatalog
 import com.example.bots.BotDialogueEngine
@@ -68,6 +70,9 @@ import com.example.chess.RankSystem
 import com.example.database.AppSettingsEntity
 import com.example.database.BotStatsEntity
 import com.example.engine.StockfishEngineStatus
+import com.example.offline.TimeCategory
+import com.example.offline.TimeControl
+import com.example.ui.components.BotAvatarView
 import kotlin.math.roundToInt
 
 @Composable
@@ -76,13 +81,15 @@ fun BotsScreen(
   tournamentProgress: TournamentProgress?,
   engineStatus: StockfishEngineStatus = StockfishEngineStatus(),
   settings: AppSettingsEntity = AppSettingsEntity(),
+  initialTab: Int = 0,
   onPlayVsBot: (BotProfile, Boolean) -> Unit,
   onWatchBotVsBot: (BotProfile, BotProfile) -> Unit,
   onStartTournament: () -> Unit,
   onCancelTournament: () -> Unit,
   onPlayVsBotWithColor: ((BotProfile, Boolean, Boolean?) -> Unit)? = null,
+  onStartCustomTournament: ((TimeControl, String) -> Unit)? = null,
 ) {
-  var selectedTab by remember { mutableIntStateOf(0) }
+  var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab.coerceIn(0, 2)) }
   var dialogBot by remember { mutableStateOf<BotProfile?>(null) }
   val statsById = remember(botStats) { botStats.associateBy { it.botId } }
   val myRank = remember(settings.localRating) { RankSystem.rankForElo(settings.localRating) }
@@ -177,7 +184,10 @@ fun BotsScreen(
       2 -> BotTournamentTab(
         tournamentProgress = tournamentProgress,
         onWatchBotVsBot = onWatchBotVsBot,
-        onStartTournament = onStartTournament,
+        onStartTournament = { tc, tier ->
+          if (onStartCustomTournament != null) onStartCustomTournament(tc, tier)
+          else onStartTournament()
+        },
         onCancelTournament = onCancelTournament,
       )
     }
@@ -237,19 +247,7 @@ private fun BotRosterTab(
             .padding(14.dp),
           verticalAlignment = Alignment.CenterVertically,
         ) {
-          Box(
-            modifier = Modifier
-              .size(46.dp)
-              .clip(CircleShape)
-              .background(Color(bot.emblemColorHex).copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center,
-          ) {
-            Icon(
-              imageVector = Icons.Filled.SmartToy,
-              contentDescription = null,
-              tint = Color(bot.emblemColorHex),
-            )
-          }
+          BotAvatarView(bot = bot, size = 50.dp)
           Spacer(modifier = Modifier.width(12.dp))
           Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -268,7 +266,14 @@ private fun BotRosterTab(
               }
             }
             Text(
-              text = "${bot.difficulty.label} (${botRank.title}) • ${bot.style}",
+              text = "${bot.nationality} • ${bot.favoriteOpening}",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.primary,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+              text = "\"${bot.catchphrase}\" — ${bot.bio}",
               style = MaterialTheme.typography.bodySmall,
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               maxLines = 2,
@@ -427,11 +432,12 @@ private fun BotTrainingTab(
             .fillMaxWidth()
             .padding(14.dp),
           verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.SpaceBetween,
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+          BotAvatarView(bot = bot, size = 44.dp)
           Column(modifier = Modifier.weight(1f)) {
             Text("${bot.name} (${bot.rating} Elo • ${rank.badge})", style = MaterialTheme.typography.titleMedium)
-            Text("${bot.difficulty.label} • ${rank.title}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${bot.nationality} • ${bot.favoriteOpening}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
           }
           OutlinedButton(onClick = { onStartTraining(bot) }) {
             Text("Train")
@@ -442,15 +448,19 @@ private fun BotTrainingTab(
   }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BotTournamentTab(
   tournamentProgress: TournamentProgress?,
   onWatchBotVsBot: (BotProfile, BotProfile) -> Unit,
-  onStartTournament: () -> Unit,
+  onStartTournament: (TimeControl, String) -> Unit,
   onCancelTournament: () -> Unit,
 ) {
   var whiteBot by remember { mutableStateOf(BotCatalog.presets[3]) }
   var blackBot by remember { mutableStateOf(BotCatalog.presets[4]) }
+  var selectedCategory by remember { mutableStateOf(TimeCategory.BLITZ) }
+  var selectedTc by remember { mutableStateOf(TimeControl.presets[4]) } // 5+0
+  var selectedTier by remember { mutableStateOf("All-Stars") }
 
   LazyColumn(
     modifier = Modifier.fillMaxSize(),
@@ -469,10 +479,15 @@ private fun BotTournamentTab(
             Icon(Icons.Filled.VerifiedUser, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             Text(stringResource(R.string.play_mode_bvb), style = MaterialTheme.typography.titleMedium)
           }
-          Text(
-            text = "${whiteBot.name} (${whiteBot.rating}) vs ${blackBot.name} (${blackBot.rating})",
-            style = MaterialTheme.typography.bodyMedium,
-          )
+          Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BotAvatarView(bot = whiteBot, size = 32.dp)
+            Text(
+              text = "${whiteBot.name} (${whiteBot.rating}) vs ${blackBot.name} (${blackBot.rating})",
+              style = MaterialTheme.typography.bodyMedium,
+              modifier = Modifier.weight(1f),
+            )
+            BotAvatarView(bot = blackBot, size = 32.dp)
+          }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
               onClick = {
@@ -516,6 +531,39 @@ private fun BotTournamentTab(
             Text(stringResource(R.string.bots_tab_tournament), style = MaterialTheme.typography.titleMedium)
           }
 
+          Text("Format: Bullet • Blitz • Rapid • Classical", style = MaterialTheme.typography.labelLarge)
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(TimeCategory.BULLET, TimeCategory.BLITZ, TimeCategory.RAPID, TimeCategory.CLASSICAL).forEach { cat ->
+              FilterChip(
+                selected = selectedCategory == cat,
+                onClick = {
+                  selectedCategory = cat
+                  selectedTc = TimeControl.presetsByCategory(cat).firstOrNull() ?: TimeControl.presets[4]
+                },
+                label = { Text(cat.label) },
+              )
+            }
+          }
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            TimeControl.presetsByCategory(selectedCategory).forEach { tc ->
+              FilterChip(
+                selected = selectedTc.id == tc.id,
+                onClick = { selectedTc = tc },
+                label = { Text(tc.label) },
+              )
+            }
+          }
+          Text("Bracket Division", style = MaterialTheme.typography.labelLarge)
+          FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("All-Stars", "Beginners", "Club", "Masters").forEach { tier ->
+              FilterChip(
+                selected = selectedTier == tier,
+                onClick = { selectedTier = tier },
+                label = { Text(tier) },
+              )
+            }
+          }
+
           if (tournamentProgress?.isRunning == true) {
             Text("Playing: ${tournamentProgress.currentPairing}", style = MaterialTheme.typography.bodyMedium)
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -523,19 +571,31 @@ private fun BotTournamentTab(
               Text(stringResource(R.string.cancel))
             }
           } else {
-            Button(onClick = onStartTournament, modifier = Modifier.fillMaxWidth()) {
-              Text(stringResource(R.string.bots_start_tournament))
+            Button(
+              onClick = { onStartTournament(selectedTc, selectedTier) },
+              modifier = Modifier.fillMaxWidth(),
+            ) {
+              Text("Run ${selectedCategory.label} ${selectedTc.label} ($selectedTier)")
             }
           }
 
           if (tournamentProgress != null && tournamentProgress.standings.isNotEmpty()) {
             Spacer(modifier = Modifier.height(4.dp))
+            Text(
+              text = tournamentProgress.tournamentTitle,
+              style = MaterialTheme.typography.labelLarge,
+              color = MaterialTheme.colorScheme.primary,
+            )
             tournamentProgress.standings.forEachIndexed { idx, row ->
               Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
               ) {
-                Text("${idx + 1}. ${row.bot.name} (${row.bot.rating})", fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                  BotAvatarView(bot = row.bot, size = 28.dp)
+                  Text("${idx + 1}. ${row.bot.name} (${row.bot.rating})", fontWeight = FontWeight.SemiBold)
+                }
                 Text("${row.points} pts (${row.wins}W ${row.draws}D ${row.losses}L)", style = MaterialTheme.typography.labelMedium)
               }
             }
@@ -543,7 +603,7 @@ private fun BotTournamentTab(
               Spacer(modifier = Modifier.height(6.dp))
               tournamentProgress.completedMatches.forEach { m ->
                 Text(
-                  text = "${m.whiteName} vs ${m.blackName}: ${m.result.pgnValue} (${m.movesCount}m)",
+                  text = "${m.whiteName} vs ${m.blackName}: ${m.result.pgnValue} (${m.movesCount}m • ${m.timeCategoryLabel})",
                   style = MaterialTheme.typography.labelSmall,
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -571,12 +631,12 @@ private fun BotChallengeDialog(
   AlertDialog(
     onDismissRequest = onDismiss,
     title = {
-      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Filled.SmartToy, contentDescription = null, tint = Color(bot.emblemColorHex))
+      Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        BotAvatarView(bot = bot, size = 60.dp)
         Column {
           Text("${bot.name} • ${bot.rating} Elo")
           Text(
-            text = "${rank.title} (${rank.badge}) • ${bot.difficulty.label}",
+            text = "${rank.title} (${rank.badge}) • ${bot.nationality}",
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
           )
@@ -584,28 +644,44 @@ private fun BotChallengeDialog(
       }
     },
     text = {
-      Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+      Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+      ) {
         Surface(
           color = MaterialTheme.colorScheme.secondaryContainer,
           shape = MaterialTheme.shapes.small,
           modifier = Modifier.fillMaxWidth(),
         ) {
-          Text(
-            text = "\"$greeting\"",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(10.dp),
-          )
+          Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+              text = "\"$greeting\"",
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+              text = "Motto: \"${bot.catchphrase}\"",
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.SemiBold,
+              color = MaterialTheme.colorScheme.primary,
+            )
+          }
         }
         Text(
-          text = bot.style,
+          text = bot.bio,
           style = MaterialTheme.typography.bodySmall,
+          color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+          text = "Favorite Opening: ${bot.favoriteOpening}\nStyle: ${bot.playingStyle.label} • ${bot.style}",
+          style = MaterialTheme.typography.labelSmall,
           color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (stats != null && stats.gamesPlayed > 0) {
           Text(
-            text = "Your Record: ${stats.playerWins}W - ${stats.draws}D - ${stats.playerLosses}L",
+            text = "Your H2H Record: ${stats.playerWins}W - ${stats.draws}D - ${stats.playerLosses}L",
             style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
           )
         }

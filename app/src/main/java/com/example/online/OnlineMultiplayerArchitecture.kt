@@ -7,6 +7,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -25,7 +26,7 @@ data class OnlineAccount(
   val userId: String,
   val handle: String,
   val rating: Int,
-  val sessionTokenRef: String, // Opaque session token, never a plaintext password
+  val sessionTokenRef: String,
 )
 
 data class OnlineMatchRequest(
@@ -35,9 +36,17 @@ data class OnlineMatchRequest(
   val inviteCode: String? = null,
 )
 
+data class OnlineChatMessage(
+  val id: String,
+  val sender: String,
+  val text: String,
+  val timestampMillis: Long = System.currentTimeMillis(),
+  val isSelf: Boolean = false,
+)
+
 @JsonClass(generateAdapter = true)
 data class OnlineWireEnvelope(
-  val type: String, // "auth", "queue", "create_room", "join_room", "move", "resign", "draw_offer", "draw_accept", "reconnect", "state", "error"
+  val type: String, // "auth", "queue", "create_room", "join_room", "move", "chat", "resign", "draw_offer", "draw_accept", "reconnect", "state", "error"
   val gameId: String? = null,
   val roomCode: String? = null,
   val uciMove: String? = null,
@@ -48,6 +57,8 @@ data class OnlineWireEnvelope(
   val blackTimeMs: Long? = null,
   val serverValidated: Boolean? = null,
   val result: String? = null,
+  val sender: String? = null,
+  val text: String? = null,
   val message: String? = null,
 )
 
@@ -71,11 +82,8 @@ sealed interface OnlineConnectionState {
 }
 
 /**
- * Production-ready online multiplayer transport & protocol architecture.
- * - Uses HTTPS/WSS exclusively
- * - Relies on server-authoritative move validation (`serverValidated`)
- * - Supports reconnection, private rooms, friend challenges, rated/casual queues
- * - Never fakes online multiplayer when no backend server URL is configured
+ * Production online multiplayer transport & protocol architecture over HTTPS/WSS.
+ * Supports matchmaking, private rooms, server-validated moves, reconnection, and player chat.
  */
 class OnlineMultiplayerClient {
 
@@ -90,9 +98,13 @@ class OnlineMultiplayerClient {
 
   private var webSocket: WebSocket? = null
   private var configuredUrl: String = ""
+  private var currentHandle: String = "Player"
 
   private val _state = MutableStateFlow<OnlineConnectionState>(OnlineConnectionState.BackendNotConfigured)
   val state: StateFlow<OnlineConnectionState> = _state.asStateFlow()
+
+  private val _chatMessages = MutableStateFlow<List<OnlineChatMessage>>(emptyList())
+  val chatMessages: StateFlow<List<OnlineChatMessage>> = _chatMessages.asStateFlow()
 
   fun updateServerConfiguration(serverUrl: String) {
     val clean = serverUrl.trim()
@@ -118,6 +130,7 @@ class OnlineMultiplayerClient {
       _state.value = OnlineConnectionState.Error("Valid handle and session token are required.")
       return
     }
+    currentHandle = handle.trim()
     val wssUrl = configuredUrl.replaceFirst("https://", "wss://").trimEnd('/') + "/ws/chess"
     _state.value = OnlineConnectionState.Connecting
 
@@ -134,8 +147,8 @@ class OnlineMultiplayerClient {
           _state.value = OnlineConnectionState.Connected(
             serverUrl = configuredUrl,
             account = OnlineAccount(
-              userId = handle.lowercase(),
-              handle = handle,
+              userId = currentHandle.lowercase(),
+              handle = currentHandle,
               rating = 1200,
               sessionTokenRef = "token_active",
             ),
@@ -186,6 +199,30 @@ class OnlineMultiplayerClient {
     _state.value = OnlineConnectionState.SearchingMatch(request)
   }
 
+  fun sendChatMessage(gameId: String?, rawText: String): Boolean {
+    val clean = rawText.trim()
+    if (clean.isEmpty()) return false
+    val ws = webSocket ?: return false
+    val json = envelopeAdapter.toJson(
+      OnlineWireEnvelope(
+        type = "chat",
+        gameId = gameId,
+        sender = currentHandle,
+        text = clean,
+      )
+    )
+    ws.send(json)
+    _chatMessages.update { cur ->
+      (cur + OnlineChatMessage(
+        id = "local_${System.nanoTime()}",
+        sender = currentHandle,
+        text = clean,
+        isSelf = true,
+      )).takeLast(60)
+    }
+    return true
+  }
+
   fun submitMoveForServerValidation(gameId: String, uciMove: String) {
     val ws = webSocket ?: return
     ws.send(
@@ -210,6 +247,7 @@ class OnlineMultiplayerClient {
   fun disconnect() {
     webSocket?.close(1000, "User disconnected")
     webSocket = null
+    _chatMessages.value = emptyList()
     _state.value = if (isBackendConfigured()) {
       OnlineConnectionState.Disconnected
     } else {
@@ -232,6 +270,18 @@ class OnlineMultiplayerClient {
           blackTimeMs = msg.blackTimeMs ?: 300_000L,
           lastValidatedMove = msg.uciMove,
         )
+      }
+      "chat" -> {
+        val body = msg.text ?: msg.message ?: return
+        val sender = msg.sender ?: "Opponent"
+        _chatMessages.update { cur ->
+          (cur + OnlineChatMessage(
+            id = "srv_${System.nanoTime()}",
+            sender = sender,
+            text = body,
+            isSelf = sender.equals(currentHandle, ignoreCase = true),
+          )).takeLast(60)
+        }
       }
       "error" -> {
         _state.value = OnlineConnectionState.Error(msg.message ?: "Server rejected action")

@@ -12,17 +12,21 @@ import androidx.lifecycle.viewModelScope
 import com.example.analysis.AnalysisCoordinator
 import com.example.analysis.AnalysisPolicy
 import com.example.analysis.AnalysisSessionState
+import com.example.analysis.BookPracticeSession
 import com.example.analysis.GameReviewSummary
 import com.example.analysis.MoveAnalysisEntry
 import com.example.analysis.MoveClassification
 import com.example.analysis.MoveFeedbackAnalyzer
 import com.example.analysis.PositionAnalysisSnapshot
 import com.example.analysis.TrainerDrill
+import com.example.badges.EvaluatedBadge
+import com.example.badges.GameBadgeSystem
 import com.example.bots.BotCatalog
 import com.example.bots.BotDialogueEngine
 import com.example.bots.BotTournamentEngine
 import com.example.bots.TournamentProgress
 import com.example.chess.BoardState
+import com.example.chess.BookRepertoire
 import com.example.chess.BotProfile
 import com.example.chess.ChessNotation
 import com.example.chess.ChessRules
@@ -59,7 +63,9 @@ import com.example.music.MusicController
 import com.example.music.RepeatMode
 import com.example.offline.ChessClockTracker
 import com.example.offline.SoundAndHaptics
+import com.example.offline.TimeCategory
 import com.example.offline.TimeControl
+import com.example.online.OnlineChatMessage
 import com.example.online.OnlineMatchRequest
 import com.example.online.OnlineMultiplayerClient
 import com.squareup.moshi.Moshi
@@ -162,6 +168,19 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   private val _tournamentProgress = MutableStateFlow<TournamentProgress?>(null)
   val tournamentProgress: StateFlow<TournamentProgress?> = _tournamentProgress.asStateFlow()
 
+  private val _publicFeed = MutableStateFlow(PublicFeedUiState())
+  val publicFeed: StateFlow<PublicFeedUiState> = _publicFeed.asStateFlow()
+
+  val onlineChatMessages: StateFlow<List<OnlineChatMessage>> = onlineClient.chatMessages
+
+  val evaluatedBadges: StateFlow<List<EvaluatedBadge>> = combine(settings, botStats) { s, stats ->
+    GameBadgeSystem.evaluate(s, stats)
+  }.stateIn(
+    scope = viewModelScope,
+    started = SharingStarted.WhileSubscribed(5000),
+    initialValue = GameBadgeSystem.evaluate(AppSettingsEntity(), emptyList()),
+  )
+
   private val _engineStatus = MutableStateFlow(fallbackEngineWrapper.status.value)
   val engineStatus: StateFlow<StockfishEngineStatus> = _engineStatus.asStateFlow()
 
@@ -260,6 +279,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     initialBoard: BoardState = ChessRules.initialBoardState(),
     initialMoves: List<RecordedMove> = emptyList(),
     customStartFen: String? = null,
+    variantLabel: String = "Standard",
   ) {
     botThinkJob?.cancel()
     clockTickJob?.cancel()
@@ -305,6 +325,8 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       botDialogue = initialDialogue,
       botDialogueHistory = listOfNotNull(initialDialogue),
       customStartFen = customStartFen,
+      chessVariantLabel = variantLabel,
+      lastDialogueOpeningKey = opening?.let { "${it.eco}:${it.name}" },
     )
 
     if (navigateToPlay) {
@@ -320,6 +342,53 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       sanMoves = initialMoves.map { it.san },
     )
     maybeTriggerBotTurn()
+  }
+
+  fun startCustomGame(
+    mode: GameMode,
+    white: Opponent,
+    black: Opponent,
+    timeControl: TimeControl,
+    variant: String,
+    chess960Seed: Int = kotlin.random.Random.nextInt(960),
+    handicapPiece: PieceType? = null,
+    handicapFromWhite: Boolean = true,
+    customFen: String? = null,
+    navigateToPlay: Boolean = true,
+  ) {
+    val startBoard = when (variant) {
+      "Chess960" -> ChessRules.chess960BoardState(chess960Seed)
+      "Handicap" -> ChessRules.handicapBoardState(handicapPiece ?: PieceType.QUEEN, handicapFromWhite)
+      "Custom FEN" -> {
+        val parsed = customFen?.let { ChessNotation.fromFen(it) }
+        if (parsed == null) {
+          postMessage("Invalid custom FEN; loaded standard board.")
+          ChessRules.initialBoardState()
+        } else {
+          val err = MoveFeedbackAnalyzer.validateCustomPosition(parsed)
+          if (err != null) {
+            postMessage(err)
+            return
+          }
+          parsed
+        }
+      }
+      else -> ChessRules.initialBoardState()
+    }
+    if (variant != "Standard") {
+      unlockBadge("custom_architect")
+    }
+    val fenUsed = if (variant == "Standard") null else ChessNotation.toFen(startBoard)
+    startNewGame(
+      mode = mode,
+      white = white,
+      black = black,
+      timeControl = timeControl,
+      navigateToPlay = navigateToPlay,
+      initialBoard = startBoard,
+      customStartFen = fenUsed,
+      variantLabel = if (variant == "Chess960") "Chess960 #$chess960Seed" else variant,
+    )
   }
 
   fun onSquareTapped(square: Int) {
@@ -433,10 +502,21 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     val activeBotOpp = (if (mover == PieceColor.WHITE) g.whiteOpponent else g.blackOpponent) as? Opponent.Bot
     val otherBotOpp = (if (mover == PieceColor.WHITE) g.blackOpponent else g.whiteOpponent) as? Opponent.Bot
     val speakingBot = activeBotOpp ?: otherBotOpp
-    val newDialogue = if (res != GameResult.IN_PROGRESS && speakingBot != null) {
+    val openingKey = opening?.let { "${it.eco}:${it.name}" }
+    val openingChanged = opening != null && openingKey != g.lastDialogueOpeningKey && s.showOpeningInfo
+    if (openingChanged && opening?.isGambit == true) {
+      unlockBadge("gambit_daredevil")
+    }
+    val openingDialogue = if (openingChanged && opening != null) {
+      BotDialogueEngine.onOpeningDetected(speakingBot?.profile, opening)
+    } else null
+
+    val moveDialogue = if (res != GameResult.IN_PROGRESS && speakingBot != null) {
       val botPlayedWhite = g.whiteOpponent is Opponent.Bot &&
         (g.whiteOpponent as Opponent.Bot).profile.id == speakingBot.profile.id
       BotDialogueEngine.onGameFinished(speakingBot.profile, res, reason, botPlayedWhite)
+    } else if (openingDialogue != null) {
+      openingDialogue
     } else if (speakingBot != null) {
       BotDialogueEngine.onMovePlayed(
         bot = speakingBot.profile,
@@ -465,13 +545,14 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         result = res,
         termination = reason,
         opening = if (s.showOpeningInfo) (opening ?: it.opening) else null,
+        lastDialogueOpeningKey = openingKey ?: it.lastDialogueOpeningKey,
         drawOfferPendingFrom = null,
         evalCpForWhite = staticEvalCp,
         evalMateIn = null,
         hintMove = null,
-        botDialogue = newDialogue ?: it.botDialogue,
-        botDialogueHistory = if (newDialogue != null) {
-          (it.botDialogueHistory + newDialogue).takeLast(12)
+        botDialogue = moveDialogue ?: it.botDialogue,
+        botDialogueHistory = if (moveDialogue != null) {
+          (it.botDialogueHistory + moveDialogue).takeLast(16)
         } else it.botDialogueHistory,
       )
     }
@@ -598,6 +679,10 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
           pvSanList = snapshot.pvSanList,
           enableCriticalMoments = curSettings.enableCriticalMoments,
         )
+      }
+
+      if (feedbackEntry?.classification == MoveClassification.BRILLIANT) {
+        unlockBadge("brilliant_mind")
       }
 
       if (_gameState.value.boardState == nextState) {
@@ -841,6 +926,9 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
 
   private fun onGameFinished(res: GameResult, reason: TerminationReason) {
     val g = _gameState.value
+    if (g.timeControl.category == TimeCategory.BULLET || g.timeControl.category == TimeCategory.BLITZ) {
+      unlockBadge("speed_demon")
+    }
     viewModelScope.launch {
       saveCurrentGameToDb(isFinished = true)
       if (g.mode == GameMode.HUMAN_VS_BOT) {
@@ -1115,16 +1203,34 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
   }
 
   fun startFourBotTournament() {
+    startBotTournament(TimeControl.presets[4], "All-Stars")
+  }
+
+  fun startBotTournament(
+    timeControl: TimeControl = TimeControl.presets[4],
+    tierKey: String = "All-Stars",
+  ) {
     if (tournamentJob?.isActive == true) return
     tournamentJob = viewModelScope.launch {
-      val participants = BotCatalog.presets.take(4)
+      val all = BotCatalog.presets
+      val participants = when (tierKey) {
+        "Beginners" -> all.take(4)
+        "Club" -> all.slice(3..6)
+        "Masters" -> all.takeLast(4)
+        else -> listOf(all[1], all[4], all[7], all.last()).distinctBy { it.id }
+      }
       val s = settings.value
       BotTournamentEngine.runRoundRobin(
         participants = participants,
+        timeControl = timeControl,
+        tournamentTitle = "${timeControl.category.label} ${timeControl.label} • $tierKey",
         lowMemoryMode = s.lowMemoryMode,
         isLowRamHardware = memoryProfile.isLowRamHardware,
       ) { progress ->
         _tournamentProgress.value = progress
+        if (!progress.isRunning && progress.completedMatches.isNotEmpty()) {
+          unlockBadge("tournament_victor")
+        }
       }
     }
   }
@@ -1302,6 +1408,142 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     onlineClient.requestMatch(request)
   }
 
+  fun sendOnlineChat(text: String) {
+    val active = onlineClient.state.value as? com.example.online.OnlineConnectionState.ActiveOnlineGame
+    val sent = onlineClient.sendChatMessage(active?.gameId, text)
+    if (!sent) {
+      postMessage("Connect to an online server first to chat.")
+    }
+  }
+
+  fun refreshTvChannels() {
+    viewModelScope.launch {
+      _publicFeed.update { it.copy(isLoadingTv = true, tvError = null) }
+      when (val res = lichessRepo.fetchTvChannels()) {
+        is ApiFetchOutcome.Success -> _publicFeed.update {
+          it.copy(tvChannels = res.data, isLoadingTv = false, tvError = null)
+        }
+        is ApiFetchOutcome.Failure -> _publicFeed.update {
+          it.copy(isLoadingTv = false, tvError = res.message)
+        }
+      }
+    }
+  }
+
+  fun watchPublicGame(gameId: String, label: String = "Live Game") {
+    viewModelScope.launch {
+      postMessage("Loading $label...")
+      when (val res = lichessRepo.fetchPublicGamePgn(gameId)) {
+        is ApiFetchOutcome.Success -> loadPgnTextForReplay(res.data, "White", "Black")
+        is ApiFetchOutcome.Failure -> postMessage(res.message)
+      }
+    }
+  }
+
+  fun refreshLiveTournaments() {
+    viewModelScope.launch {
+      _publicFeed.update { it.copy(isLoadingTournaments = true, tournamentsError = null) }
+      when (val res = lichessRepo.fetchLiveTournaments()) {
+        is ApiFetchOutcome.Success -> _publicFeed.update {
+          it.copy(liveTournaments = res.data, isLoadingTournaments = false, tournamentsError = null)
+        }
+        is ApiFetchOutcome.Failure -> _publicFeed.update {
+          it.copy(isLoadingTournaments = false, tournamentsError = res.message)
+        }
+      }
+    }
+  }
+
+  fun refreshChessNews() {
+    viewModelScope.launch {
+      _publicFeed.update { it.copy(isLoadingNews = true, newsError = null) }
+      when (val res = lichessRepo.fetchChessNewsBroadcasts()) {
+        is ApiFetchOutcome.Success -> _publicFeed.update {
+          it.copy(newsItems = res.data, isLoadingNews = false, newsError = null)
+        }
+        is ApiFetchOutcome.Failure -> _publicFeed.update {
+          it.copy(isLoadingNews = false, newsError = res.message)
+        }
+      }
+    }
+  }
+
+  fun scoutOtherPlayer(platform: String, rawUsername: String) {
+    val clean = rawUsername.trim()
+    if (clean.isEmpty()) return
+    viewModelScope.launch {
+      _publicFeed.update {
+        it.copy(
+          scoutPlatform = platform,
+          scoutProfile = PlatformProfileUiState(isLoading = true, username = clean),
+        )
+      }
+      if (platform == "LICHESS") {
+        when (val res = lichessRepo.fetchProfileAndGames(clean)) {
+          is ApiFetchOutcome.Success -> {
+            val d = res.data
+            _publicFeed.update {
+              it.copy(
+                scoutProfile = PlatformProfileUiState(
+                  isLoading = false,
+                  username = d.username,
+                  title = d.title,
+                  ratingsSummary = d.ratingsSummary,
+                  totalGames = d.totalGames,
+                  wins = d.wins,
+                  losses = d.losses,
+                  draws = d.draws,
+                  profileUrl = d.profileUrl,
+                  recentGames = d.recentGames,
+                )
+              )
+            }
+          }
+          is ApiFetchOutcome.Failure -> _publicFeed.update {
+            it.copy(scoutProfile = PlatformProfileUiState(isLoading = false, username = clean, errorMessage = res.message))
+          }
+        }
+      } else {
+        when (val res = chessComRepo.fetchProfileAndGames(clean)) {
+          is ApiFetchOutcome.Success -> {
+            val d = res.data
+            _publicFeed.update {
+              it.copy(
+                scoutProfile = PlatformProfileUiState(
+                  isLoading = false,
+                  username = d.username,
+                  title = d.title,
+                  ratingsSummary = d.ratingsSummary,
+                  totalGames = d.totalGames,
+                  wins = d.wins,
+                  losses = d.losses,
+                  draws = d.draws,
+                  profileUrl = d.profileUrl,
+                  recentGames = d.recentGames,
+                )
+              )
+            }
+          }
+          is ApiFetchOutcome.Failure -> _publicFeed.update {
+            it.copy(scoutProfile = PlatformProfileUiState(isLoading = false, username = clean, errorMessage = res.message))
+          }
+        }
+      }
+    }
+  }
+
+  private fun unlockBadge(badgeId: String) {
+    viewModelScope.launch {
+      val current = GameBadgeSystem.parseCsv(settings.value.unlockedBadgesCsv)
+      if (badgeId !in current) {
+        val updatedCsv = GameBadgeSystem.toCsv(current + badgeId)
+        repository.updateSettings { it.copy(unlockedBadgesCsv = updatedCsv) }
+        val badgeTitle = GameBadgeSystem.allBadges.firstOrNull { it.id == badgeId }?.title ?: badgeId
+        postMessage("Badge Unlocked: $badgeTitle")
+      }
+    }
+  }
+
   fun updateSettings(transform: (AppSettingsEntity) -> AppSettingsEntity) {
     viewModelScope.launch {
       val updated = repository.updateSettings(transform)
@@ -1376,6 +1618,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     val bOpp = if (vsBot != null && parsed.turn == PieceColor.WHITE) Opponent.Bot(vsBot) else {
       if (vsBot != null) Opponent.Human(playerName) else Opponent.Human("Player 2")
     }
+    unlockBadge("custom_architect")
     startNewGame(
       mode = if (vsBot != null) GameMode.HUMAN_VS_BOT else GameMode.HUMAN_VS_HUMAN,
       white = wOpp,
@@ -1385,6 +1628,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       navigateToPlay = true,
       initialBoard = parsed,
       customStartFen = rawFen.trim(),
+      variantLabel = "Custom FEN",
     )
     return true
   }
@@ -1421,10 +1665,64 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     loadFenIntoAnalysis(drill.fen, asPractice = true, drill = drill)
   }
 
+  fun startBookPractice(repertoire: BookRepertoire) {
+    gameReviewJob?.cancel()
+    val start = ChessRules.initialBoardState()
+    var cur = start
+    val states = mutableListOf(start)
+    val moves = mutableListOf<RecordedMove>()
+    var stepIdx = 0
+    // If practicing as Black, auto-play White's 1st book move
+    if (repertoire.practiceAs == PieceColor.BLACK && repertoire.movesTokens.isNotEmpty()) {
+      val firstSan = repertoire.movesTokens[0]
+      val legal = ChessRules.legalMoves(cur)
+      val m = ChessNotation.parseSanMove(cur, firstSan)
+      if (m != null) {
+        val next = ChessRules.applyMove(cur, m)
+        moves.add(RecordedMove(m, firstSan, m.toUci(), ChessNotation.toFen(next)))
+        states.add(next)
+        cur = next
+        stepIdx = 1
+      }
+    }
+    val nextExpected = repertoire.movesTokens.getOrNull(stepIdx)
+    val statusMsg = if (nextExpected != null) {
+      "Book Practice (${repertoire.eco}): ${repertoire.name}. Find your ${repertoire.practiceAs.name.lowercase()} book move (${stepIdx + 1}/${repertoire.movesTokens.size})."
+    } else "Repertoire ready!"
+
+    _analysisSession.value = AnalysisSessionState(
+      boardState = cur,
+      historyStates = states,
+      historyMoves = moves,
+      currentPly = moves.size,
+      legalMoves = ChessRules.legalMoves(cur),
+      isFlipped = repertoire.practiceAs == PieceColor.BLACK,
+      practiceActive = false,
+      practicePlayerColor = repertoire.practiceAs,
+      practiceCoachPrompt = statusMsg,
+      bookPractice = BookPracticeSession(
+        repertoire = repertoire,
+        stepIndex = stepIdx,
+        completed = false,
+        mistakesCount = 0,
+        statusMessage = statusMsg,
+      ),
+      analysisDepthMode = _analysisSession.value.analysisDepthMode,
+    )
+    _currentSection.value = AppSection.ANALYSIS
+    refreshAnalysisSnapshot()
+  }
+
+  fun setAnalysisDepthMode(mode: String) {
+    _analysisSession.update { it.copy(analysisDepthMode = mode) }
+    refreshAnalysisSnapshot()
+  }
+
   fun toggleAnalysisPracticeMode(active: Boolean) {
     _analysisSession.update {
       it.copy(
         practiceActive = active,
+        bookPractice = null,
         practicePlayerColor = it.boardState.turn,
         practiceCoachPrompt = if (active) "Practice active: play moves and get instant coach feedback." else null,
         practiceRetryCount = 0,
@@ -1441,6 +1739,13 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
     val clamped = targetPly.coerceIn(0, s.historyStates.lastIndex)
     val targetBoard = s.historyStates[clamped]
     val entryAtPly = if (clamped > 0) s.reviewSummary.moveEntries.getOrNull(clamped - 1) else null
+    val updatedBp = s.bookPractice?.let { bp ->
+      val idx = clamped.coerceAtMost(bp.repertoire.movesTokens.size)
+      bp.copy(
+        stepIndex = idx,
+        completed = idx >= bp.repertoire.movesTokens.size,
+      )
+    }
     _analysisSession.update {
       it.copy(
         currentPly = clamped,
@@ -1448,6 +1753,7 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         legalMoves = ChessRules.legalMoves(targetBoard),
         selectedSquare = null,
         lastMoveFeedback = entryAtPly,
+        bookPractice = updatedBp,
       )
     }
     refreshAnalysisSnapshot()
@@ -1495,8 +1801,53 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       else -> soundHaptics.playMoveSound(curSettings)
     }
 
+    val bp = sessionBefore.bookPractice
+    if (bp != null && !bp.completed && stateBefore.turn == bp.repertoire.practiceAs) {
+      val expectedSan = bp.repertoire.movesTokens.getOrNull(bp.stepIndex)
+      val normalizedSan = san.trimEnd('+', '#')
+      val normalizedExpected = expectedSan?.trimEnd('+', '#')
+      if (normalizedExpected != null && normalizedSan != normalizedExpected) {
+        val errMsg = "Not the book line ($san). Try $expectedSan — tap Retry / Undo."
+        _analysisSession.update {
+          it.copy(
+            selectedSquare = null,
+            practiceCoachPrompt = errMsg,
+            bookPractice = bp.copy(mistakesCount = bp.mistakesCount + 1, statusMessage = errMsg),
+          )
+        }
+        return
+      }
+    }
+
     val truncatedStates = sessionBefore.historyStates.take(sessionBefore.currentPly + 1) + nextState
     val truncatedMoves = sessionBefore.historyMoves.take(sessionBefore.currentPly) + RecordedMove(move, san, move.toUci(), fenAfter)
+
+    var updatedBp = bp
+    var updatedCoachPrompt = sessionBefore.practiceCoachPrompt
+    var autoReplyBookSan: String? = null
+    if (bp != null && !bp.completed) {
+      val nextIdx = bp.stepIndex + 1
+      if (nextIdx >= bp.repertoire.movesTokens.size) {
+        val doneMsg = "Book Line Mastered: ${bp.repertoire.name}! (${bp.mistakesCount} mistake(s))"
+        updatedBp = bp.copy(stepIndex = nextIdx, completed = true, statusMessage = doneMsg)
+        updatedCoachPrompt = doneMsg
+        viewModelScope.launch {
+          val updatedSettings = repository.updateSettings {
+            it.copy(bookDrillsCompleted = it.bookDrillsCompleted + 1)
+          }
+          if (updatedSettings.bookDrillsCompleted >= 3) {
+            unlockBadge("book_scholar")
+          }
+        }
+      } else {
+        if (nextState.turn != bp.repertoire.practiceAs) {
+          autoReplyBookSan = bp.repertoire.movesTokens[nextIdx]
+        }
+        val msg = "Book move $san! Continue ${bp.repertoire.name} (${nextIdx}/${bp.repertoire.movesTokens.size})."
+        updatedBp = bp.copy(stepIndex = nextIdx, statusMessage = msg)
+        updatedCoachPrompt = msg
+      }
+    }
 
     _analysisSession.update {
       it.copy(
@@ -1506,7 +1857,20 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         currentPly = truncatedMoves.size,
         selectedSquare = null,
         legalMoves = ChessRules.legalMoves(nextState),
+        bookPractice = updatedBp,
+        practiceCoachPrompt = updatedCoachPrompt,
       )
+    }
+
+    if (autoReplyBookSan != null) {
+      viewModelScope.launch {
+        delay(320L)
+        if (_analysisSession.value.boardState == nextState) {
+          val replyMove = ChessNotation.parseSanMove(nextState, autoReplyBookSan)
+          if (replyMove != null) playAnalysisMove(replyMove)
+        }
+      }
+      return
     }
 
     refreshAnalysisSnapshot(
@@ -1530,13 +1894,25 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
       val sanList = s.historyMoves.take(s.currentPly).map { it.san }
       _analysisSession.update { it.copy(snapshot = it.snapshot.copy(isAnalyzing = AnalysisPolicy.shouldRunLiveEngine(curSettings))) }
 
+      val constrained = curSettings.lowMemoryMode || memoryProfile.isLowRamHardware
+      val reqDepth = when (s.analysisDepthMode) {
+        "Fast" -> 2
+        "Deep" -> if (constrained) 3 else 4
+        else -> if (constrained) 2 else 3
+      }
+      val reqTime = when (s.analysisDepthMode) {
+        "Fast" -> 160L
+        "Deep" -> if (constrained) 320L else 620L
+        else -> if (constrained) 240L else 420L
+      }
+
       val (snapshot, afterOut) = AnalysisCoordinator.buildPositionSnapshot(
         state = s.boardState,
         sanMovesSoFar = sanList,
         settings = curSettings,
         memoryProfile = memoryProfile,
-        requestedDepth = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 2 else 3,
-        requestedTimeMs = if (curSettings.lowMemoryMode || memoryProfile.isLowRamHardware) 240L else 420L,
+        requestedDepth = reqDepth,
+        requestedTimeMs = reqTime,
         runDetailed = ::runEngineDetailed,
       )
 
@@ -1564,6 +1940,9 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
           pvSanList = snapshot.pvSanList,
           enableCriticalMoments = curSettings.enableCriticalMoments,
         )
+        if (feedback.classification == MoveClassification.BRILLIANT) {
+          unlockBadge("brilliant_mind")
+        }
 
         if (_analysisSession.value.practiceActive && stateBefore.turn == _analysisSession.value.practicePlayerColor) {
           if (feedback.classification.isMistakeOrWorse) {
@@ -1632,12 +2011,18 @@ class ChessHubViewModel(application: Application) : AndroidViewModel(application
         moves = s.historyMoves,
         settings = curSettings,
         memoryProfile = memoryProfile,
+        depthMode = s.analysisDepthMode,
         runDetailed = ::runEngineDetailed,
         onProgress = { partial ->
           _analysisSession.update { it.copy(reviewSummary = partial) }
         },
       )
       _analysisSession.update { it.copy(reviewSummary = summary) }
+      repository.updateSettings { it.copy(gameReviewsCompleted = it.gameReviewsCompleted + 1) }
+      unlockBadge("game_analyst")
+      if (summary.whiteCounts.brilliant + summary.blackCounts.brilliant > 0) {
+        unlockBadge("brilliant_mind")
+      }
       engineService?.releaseSearchMemory()
       fallbackEngineWrapper.releaseSearchMemory()
     }

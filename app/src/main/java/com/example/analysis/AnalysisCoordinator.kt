@@ -138,6 +138,7 @@ object AnalysisCoordinator {
     moves: List<RecordedMove>,
     settings: AppSettingsEntity,
     memoryProfile: MemoryProfile,
+    depthMode: String = "Balanced",
     runDetailed: suspend (BoardState, SearchBudget, Boolean, Boolean, Boolean) -> EngineAnalysisOutput,
     onProgress: (GameReviewSummary) -> Unit,
   ): GameReviewSummary {
@@ -149,8 +150,17 @@ object AnalysisCoordinator {
       )
     }
 
-    val reviewDepth = if (settings.lowMemoryMode || memoryProfile.isLowRamHardware) 2 else 3
-    val reviewTimeMs = if (settings.lowMemoryMode || memoryProfile.isLowRamHardware) 110L else 190L
+    val isConstrained = settings.lowMemoryMode || memoryProfile.isLowRamHardware
+    val reviewDepth = when (depthMode) {
+      "Fast" -> 2
+      "Deep" -> if (isConstrained) 3 else 4
+      else -> if (isConstrained) 2 else 3
+    }
+    val reviewTimeMs = when (depthMode) {
+      "Fast" -> 95L
+      "Deep" -> if (isConstrained) 180L else 320L
+      else -> if (isConstrained) 115L else 190L
+    }
     val budget = DeviceMemoryAdvisor.computeSearchBudget(
       requestedDepth = reviewDepth,
       requestedTimeMs = reviewTimeMs,
@@ -246,11 +256,25 @@ object AnalysisCoordinator {
     val whiteAcc = if (whiteMoves.isEmpty()) 100.0 else whiteMoves.map { it.moveAccuracyPercent }.average()
     val blackAcc = if (blackMoves.isEmpty()) 100.0 else blackMoves.map { it.moveAccuracyPercent }.average()
 
+    val whiteCounts = summarizeSide(whiteMoves)
+    val blackCounts = summarizeSide(blackMoves)
+
+    fun phaseAvg(subset: List<MoveAnalysisEntry>): Double? =
+      if (subset.isEmpty()) null else subset.map { it.moveAccuracyPercent }.average()
+
+    val wOpening = phaseAvg(whiteMoves.filter { it.plyIndex <= 16 })
+    val wMid = phaseAvg(whiteMoves.filter { it.plyIndex in 17..48 })
+    val wEnd = phaseAvg(whiteMoves.filter { it.plyIndex > 48 })
+
+    val bOpening = phaseAvg(blackMoves.filter { it.plyIndex <= 16 })
+    val bMid = phaseAvg(blackMoves.filter { it.plyIndex in 17..48 })
+    val bEnd = phaseAvg(blackMoves.filter { it.plyIndex > 48 })
+
     val blunders = entries.count { it.classification == MoveClassification.BLUNDER }
     val mistakes = entries.count { it.classification == MoveClassification.MISTAKE }
     val brilliants = entries.count { it.classification == MoveClassification.BRILLIANT }
     val note = buildString {
-      append("White %.1f%% • Black %.1f%% accuracy".format(whiteAcc, blackAcc))
+      append("White %.1f%% (ACPL %d) • Black %.1f%% (ACPL %d)".format(whiteAcc, whiteCounts.averageCpLoss, blackAcc, blackCounts.averageCpLoss))
       if (brilliants > 0) append(" • $brilliants Brilliant")
       if (mistakes > 0) append(" • $mistakes Mistake(s)")
       if (blunders > 0) append(" • $blunders Blunder(s)")
@@ -260,11 +284,37 @@ object AnalysisCoordinator {
       moveEntries = entries,
       whiteAccuracyPercent = whiteAcc,
       blackAccuracyPercent = blackAcc,
+      whiteCounts = whiteCounts,
+      blackCounts = blackCounts,
+      whiteOpeningAcc = wOpening,
+      whiteMiddlegameAcc = wMid,
+      whiteEndgameAcc = wEnd,
+      blackOpeningAcc = bOpening,
+      blackMiddlegameAcc = bMid,
+      blackEndgameAcc = bEnd,
       evalSeriesForWhite = evalSeries,
       criticalPlyIndices = criticalIndices,
       summaryNote = note,
       isRunning = isRunning,
       progressFraction = progress,
+    )
+  }
+
+  fun summarizeSide(sideMoves: List<MoveAnalysisEntry>): SideFeedbackCounts {
+    if (sideMoves.isEmpty()) return SideFeedbackCounts()
+    val avgAcpl = sideMoves.map { (-it.evalDeltaForMoverCp).coerceAtLeast(0) }.average().toInt()
+    return SideFeedbackCounts(
+      totalMoves = sideMoves.size,
+      brilliant = sideMoves.count { it.classification == MoveClassification.BRILLIANT },
+      best = sideMoves.count { it.classification == MoveClassification.BEST },
+      excellent = sideMoves.count { it.classification == MoveClassification.EXCELLENT },
+      good = sideMoves.count { it.classification == MoveClassification.GOOD },
+      book = sideMoves.count { it.classification == MoveClassification.BOOK },
+      inaccuracy = sideMoves.count { it.classification == MoveClassification.INACCURACY },
+      mistake = sideMoves.count { it.classification == MoveClassification.MISTAKE },
+      missedOpportunity = sideMoves.count { it.classification == MoveClassification.MISSED_OPPORTUNITY },
+      blunder = sideMoves.count { it.classification == MoveClassification.BLUNDER },
+      averageCpLoss = avgAcpl,
     )
   }
 

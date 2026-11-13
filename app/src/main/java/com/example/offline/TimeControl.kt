@@ -3,6 +3,14 @@ package com.example.offline
 import android.os.SystemClock
 import com.example.chess.PieceColor
 
+enum class TimeCategory(val label: String) {
+  BULLET("Bullet"),
+  BLITZ("Blitz"),
+  RAPID("Rapid"),
+  CLASSICAL("Classical"),
+  UNLIMITED("Unlimited"),
+}
+
 data class TimeControl(
   val id: String,
   val label: String,
@@ -13,9 +21,19 @@ data class TimeControl(
   val initialMillis: Long get() = initialMinutes * 60_000L
   val incrementMillis: Long get() = incrementSeconds * 1_000L
 
+  val category: TimeCategory
+    get() = when {
+      isUnlimited -> TimeCategory.UNLIMITED
+      initialMinutes * 60 + incrementSeconds * 40 < 180 -> TimeCategory.BULLET
+      initialMinutes * 60 + incrementSeconds * 40 < 600 -> TimeCategory.BLITZ
+      initialMinutes * 60 + incrementSeconds * 40 < 1800 -> TimeCategory.RAPID
+      else -> TimeCategory.CLASSICAL
+    }
+
   companion object {
     val presets: List<TimeControl> = listOf(
       TimeControl("1_0", "1+0", 1, 0),
+      TimeControl("1_1", "1+1", 1, 1),
       TimeControl("2_1", "2+1", 2, 1),
       TimeControl("3_0", "3+0", 3, 0),
       TimeControl("3_2", "3+2", 3, 2),
@@ -25,8 +43,12 @@ data class TimeControl(
       TimeControl("10_5", "10+5", 10, 5),
       TimeControl("15_10", "15+10", 15, 10),
       TimeControl("30_0", "30+0", 30, 0),
+      TimeControl("60_0", "60+0", 60, 0),
       TimeControl("unlimited", "Unlimited", 0, 0, isUnlimited = true),
     )
+
+    fun presetsByCategory(category: TimeCategory): List<TimeControl> =
+      presets.filter { it.category == category }
 
     fun custom(minutes: Int, incrementSeconds: Int): TimeControl {
       val m = minutes.coerceIn(1, 180)
