@@ -29,36 +29,30 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Fix permission for Gradle Wrapper
-      - name: Make Gradle Wrapper executable
-        run: chmod +x gradlew
+      - name: Check project files
+        run: |
+          echo "Project files:"
+          ls -la
+          echo "App folder:"
+          ls -la app || true
 
-      # Check that Gradle works
-      - name: Check Gradle
-        run: ./gradlew --version
-
-      # Run tests
       - name: Run Unit Tests
-        run: ./gradlew :app:testDebugUnitTest
+        run: gradle :app:testDebugUnitTest
 
-      # Build Debug APK
-      - name: Build Universal Debug APK
-        run: ./gradlew :app:assembleDebug
+      - name: Build Debug APK
+        run: gradle :app:assembleDebug
 
-      # Build Release APK
-      - name: Build Universal Release APK
-        run: ./gradlew :app:assembleRelease
+      - name: Build Release APK
+        run: gradle :app:assembleRelease
         continue-on-error: true
 
-      # Give the APK a simple name
       - name: Prepare APK
         run: |
           mkdir -p release
           cp app/build/outputs/apk/debug/app-debug.apk \
             release/ChessHub-universal-v1.0.0.apk
 
-      # Upload APK
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ChessHub-Universal-APK
@@ -67,8 +61,7 @@ jobs:
             app/build/outputs/apk/debug/*.apk
             app/build/outputs/apk/release/*.apk
 
-      # Create GitHub Release when pushing a v1.0.0-style tag
-      - name: Publish APK Release
+      - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
