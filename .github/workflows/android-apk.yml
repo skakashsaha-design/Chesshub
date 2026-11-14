@@ -33,16 +33,23 @@ jobs:
         run: |
           echo "===== Project ====="
           ls -la
+
           echo "===== App ====="
           ls -la app || true
+
           echo "===== Gradle ====="
           gradle --version
 
+          echo "===== Java ====="
+          java -version
+
       - name: Clean project
         run: gradle clean
+
+      - name: Create debug keystore
+        run: |
           keytool -genkeypair -v \
-            -storetype JKS \
-            -keystore debug.keystore \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
             -storepass android \
             -alias androiddebugkey \
             -keypass android \
@@ -50,6 +57,17 @@ jobs:
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Verify debug keystore
+        run: |
+          echo "===== Debug Keystore ====="
+          ls -lh "$GITHUB_WORKSPACE/debug.keystore"
+
+          echo "===== Keystore Details ====="
+          keytool -list \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android
+
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest
         continue-on-error: true
@@ -75,6 +93,9 @@ jobs:
 
           echo "===== APK files ====="
           find app/build/outputs -name "*.apk" -type f -print
+
+          echo "===== Release folder ====="
+          ls -lh release/
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
